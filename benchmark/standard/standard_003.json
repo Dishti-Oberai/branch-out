@@ -1,0 +1,7 @@
+{
+  "id": "standard_003",
+  "description": "Valid parentheses",
+  "prompt": "Write a Python function `is_valid_parens(s: str) -> bool` that returns True if the string `s`, containing only the characters '(', ')', '{', '}', '[' and ']', has correctly matched and nested brackets.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_simple_valid(self):\n        self.assertTrue(is_valid_parens('()'))\n    def test_mixed_valid(self):\n        self.assertTrue(is_valid_parens('()[]{}'))\n    def test_nested_valid(self):\n        self.assertTrue(is_valid_parens('{[]}'))\n    def test_wrong_order(self):\n        self.assertFalse(is_valid_parens('(]'))\n    def test_unclosed(self):\n        self.assertFalse(is_valid_parens('(('))\n    def test_empty(self):\n        self.assertTrue(is_valid_parens(''))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

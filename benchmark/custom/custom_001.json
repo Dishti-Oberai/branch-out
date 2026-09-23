@@ -1,0 +1,7 @@
+{
+  "id": "custom_001",
+  "description": "Rate limiter (design choice: token bucket vs sliding window)",
+  "prompt": "Implement a class `RateLimiter` with a method `allow(self, timestamp: float) -> bool` that returns True if a request at `timestamp` (a float, seconds) should be allowed under a limit of at most 3 requests per 10-second window, and False otherwise. The constructor takes no required arguments. There are multiple valid strategies (fixed window, sliding window, token bucket) \u2014 pick one and implement it correctly.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_allows_up_to_limit(self):\n        rl = RateLimiter()\n        self.assertTrue(rl.allow(0.0))\n        self.assertTrue(rl.allow(1.0))\n        self.assertTrue(rl.allow(2.0))\n    def test_blocks_over_limit_in_window(self):\n        rl = RateLimiter()\n        rl.allow(0.0); rl.allow(1.0); rl.allow(2.0)\n        self.assertFalse(rl.allow(3.0))\n    def test_allows_again_after_window(self):\n        rl = RateLimiter()\n        rl.allow(0.0); rl.allow(1.0); rl.allow(2.0)\n        self.assertTrue(rl.allow(11.0))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

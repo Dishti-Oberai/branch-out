@@ -1,0 +1,7 @@
+{
+  "id": "custom_005",
+  "description": "Thread-safe counter (multi-step: correctness under a design constraint, not just one function)",
+  "prompt": "Implement a class `SafeCounter` with methods `increment(self)` and `value(self) -> int`, intended to be safe to call `increment` from multiple threads concurrently without losing updates (use appropriate synchronization from the `threading` module).",
+  "test_suite": "import unittest\nimport threading\n\nclass Test(unittest.TestCase):\n    def test_single_thread(self):\n        c = SafeCounter()\n        for _ in range(100):\n            c.increment()\n        self.assertEqual(c.value(), 100)\n    def test_concurrent_increments(self):\n        c = SafeCounter()\n        def worker():\n            for _ in range(1000):\n                c.increment()\n        threads = [threading.Thread(target=worker) for _ in range(5)]\n        for t in threads: t.start()\n        for t in threads: t.join()\n        self.assertEqual(c.value(), 5000)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

@@ -15,6 +15,31 @@ def test_branch_adds_n_nodes_with_correct_parent():
         assert node.parent_id == "root"
 
 
+def test_on_branch_ready_fires_per_branch_with_node_id_already_set():
+    o = Orchestrator(FakeLLM())
+    ready = []
+
+    async def on_ready(b):
+        ready.append(b.node_id)
+        # the node must already exist in the tree by the time this fires
+        assert o.tree.get_node(b.node_id).parent_id == "root"
+
+    branches = asyncio.run(o.branch("root", "task", beam_width=3, on_branch_ready=on_ready))
+    assert sorted(ready) == sorted(b.node_id for b in branches)
+
+
+def test_on_branch_ready_not_called_for_a_failed_branch():
+    o = Orchestrator(FakeLLM(fail_on={1}))
+    ready = []
+
+    async def on_ready(b):
+        ready.append(b.node_id)
+
+    branches = asyncio.run(o.branch("root", "task", beam_width=3, on_branch_ready=on_ready))
+    assert len(branches) == 2
+    assert len(ready) == 2
+
+
 def test_backtrack_activates_target_and_deletes_nothing():
     o = Orchestrator(FakeLLM())
     branches = asyncio.run(o.branch("root", "task", beam_width=3))

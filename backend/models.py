@@ -39,6 +39,10 @@ class Branch:
     reasoning: str
     score: Optional[float] = None
     rank: Optional[int] = None  # Set by score_normaliser
+    # Phase 2 addition (roadmap Step 2.3's own evaluator.py snippet assigns
+    # branch.score_source directly): mirrors TreeNode.score_source so the
+    # evaluator can tell main.py which value to persist onto the TreeNode.
+    score_source: Optional[Literal["tests", "llm_judge"]] = None
 
 
 def _iso(d: Dict[str, Any], key: str) -> None:

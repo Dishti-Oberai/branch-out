@@ -1,3 +1,6 @@
+import json
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -99,3 +102,121 @@ def test_continue_llm_failure_is_502_not_500(client):
     main._orchestrator = Orchestrator(FakeLLM(fail_on={0}))
     r = client.post("/continue", json={"node_id": "root", "prompt": "hi"})
     assert r.status_code == 502
+
+
+# ---- Phase 2: hybrid evaluator + WebSocket wiring -------------------------
+
+def test_branch_ready_events_fire_before_score_ready(client):
+    with client.websocket_connect("/ws") as ws:
+        r = client.post("/branch", json={"node_id": "root", "prompt": "hi"})
+        assert r.status_code == 200
+
+        events = [ws.receive_json() for _ in range(6)]  # 3 branch.ready + 3 score.ready
+
+    kinds = [e["event"] for e in events]
+    assert kinds.count("branch.ready") == 3
+    assert kinds.count("score.ready") == 3
+    last_branch_ready = max(i for i, k in enumerate(kinds) if k == "branch.ready")
+    first_score_ready = min(i for i, k in enumerate(kinds) if k == "score.ready")
+    assert last_branch_ready < first_score_ready
+
+    node_ids = {b["node_id"] for b in r.json()["branches"]}
+    branch_ready_events = [e for e in events if e["event"] == "branch.ready"]
+    assert {e["branch"]["node_id"] for e in branch_ready_events} == node_ids
+    score_ready_events = [e for e in events if e["event"] == "score.ready"]
+    assert {e["node_id"] for e in score_ready_events} == node_ids
+
+
+def test_score_ready_uses_test_scoring_when_code_has_tests(client):
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "import unittest\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.assertEqual(1+1, 2)",
+        "reasoning": "r",
+    }))
+    main._orchestrator = Orchestrator(llm)
+    with client.websocket_connect("/ws") as ws:
+        client.post("/branch", json={"node_id": "root", "prompt": "hi", "beam_width": 1})
+        events = [ws.receive_json() for _ in range(2)]  # 1 branch.ready + 1 score.ready
+
+    score_event = next(e for e in events if e["event"] == "score.ready")
+    assert score_event["score"] == 1.0
+    assert score_event["score_source"] == "tests"
+
+
+def test_session_load_triggers_retroactive_rescore_for_llm_judge_nodes_with_tests(client, tmp_path):
+    session_data = {
+        "nodes": [
+            {
+                "id": "root", "parent_id": None, "children_ids": ["a"],
+                "code_snapshot": "", "context_summary": "", "user_preferences": [],
+                "score": None, "score_source": None, "status": "normal",
+                "query_history": [], "branch_label": "Root",
+                "created_at": "2026-01-01T00:00:00",
+            },
+            {
+                "id": "a", "parent_id": "root", "children_ids": [],
+                "code_snapshot": (
+                    "import unittest\nclass T(unittest.TestCase):\n"
+                    "    def test_x(self):\n        self.assertEqual(1 + 1, 2)"
+                ),
+                "context_summary": "x", "user_preferences": [],
+                "score": 0.5, "score_source": "llm_judge", "status": "active",
+                "query_history": [], "branch_label": "Branch A",
+                "created_at": "2026-01-01T00:00:00",
+            },
+        ]
+    }
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps(session_data))
+
+    r = client.post("/session/load", json={"path": str(path)})
+    assert r.status_code == 200
+
+    for _ in range(40):
+        nodes = {n["id"]: n for n in client.get("/session").json()["nodes"]}
+        if nodes["a"]["score_source"] == "tests":
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("retroactive rescore did not complete in time")
+
+    assert nodes["a"]["score"] == 1.0
+
+
+def test_session_load_does_not_touch_nodes_already_test_scored_or_without_tests(client, tmp_path):
+    session_data = {
+        "nodes": [
+            {
+                "id": "root", "parent_id": None, "children_ids": ["a", "b"],
+                "code_snapshot": "", "context_summary": "", "user_preferences": [],
+                "score": None, "score_source": None, "status": "active",
+                "query_history": [], "branch_label": "Root",
+                "created_at": "2026-01-01T00:00:00",
+            },
+            {  # already tests-scored -- must not be re-touched
+                "id": "a", "parent_id": "root", "children_ids": [],
+                "code_snapshot": "import unittest",
+                "context_summary": "x", "user_preferences": [],
+                "score": 0.42, "score_source": "tests", "status": "normal",
+                "query_history": [], "branch_label": "Branch A",
+                "created_at": "2026-01-01T00:00:00",
+            },
+            {  # llm_judge but no tests in the code -- not eligible for rescore
+                "id": "b", "parent_id": "root", "children_ids": [],
+                "code_snapshot": "def f(): pass",
+                "context_summary": "x", "user_preferences": [],
+                "score": 0.9, "score_source": "llm_judge", "status": "normal",
+                "query_history": [], "branch_label": "Branch B",
+                "created_at": "2026-01-01T00:00:00",
+            },
+        ]
+    }
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps(session_data))
+
+    client.post("/session/load", json={"path": str(path)})
+    time.sleep(0.2)  # give any (wrongly-fired) background task a chance to run
+    nodes = {n["id"]: n for n in client.get("/session").json()["nodes"]}
+    assert nodes["a"]["score"] == 0.42
+    assert nodes["a"]["score_source"] == "tests"
+    assert nodes["b"]["score"] == 0.9
+    assert nodes["b"]["score_source"] == "llm_judge"

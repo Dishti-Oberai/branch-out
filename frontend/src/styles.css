@@ -252,6 +252,16 @@ button:disabled { cursor: not-allowed; }
   color: var(--ink-dim);
 }
 
+/* Step 2.4: pulsing skeleton while a background evaluation is in flight —
+   distinct from the static "not scored yet" state so a node that will
+   never be scored (continue/edit-prompt) doesn't look like it's stuck. */
+@keyframes score-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.score-pending { animation: score-pulse 1.1s ease-in-out infinite; }
+.bo-node .sub .score-pending { color: var(--indigo); font-weight: 600; }
+
 .edit-prompt { margin-top: 8px; }
 .edit-prompt textarea {
   width: 100%;

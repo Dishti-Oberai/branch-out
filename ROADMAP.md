@@ -1,7 +1,7 @@
 # Branch-Out Roadmap
 
 Checklist of phases, steps and substeps. `[x]` done, `[ ]` to do, `[~]` built but differs from the spec (see notes).
-Rules: finish and verify Phase N before starting N+1. Phases 2 and 3 are independent; Phase 4 needs both; Phase 5 needs all.
+Rules: finish and verify Phase N before starting N+1. Phase 3 (VS Code extension, inserted 2026-09-26) only needs Phases 1–2. Phases 4 (cross-node querying) and Phase 3 are independent of each other; Phase 5 (patches) needs both 2 and 4, and upgrades Phase 3's file-apply; Phase 6 needs all.
 Fixed constraints: append-only nodes (only `status` and `children_ids` may change), `anthropic` imported only in `claude_client.py`, `asyncio.gather` for generation, async evaluation, selective subgraph context, save on session end only, beam width default defined once, `/patch` always runs conflict detection. Every module gets a test file; every fail-open path gets a deliberately-broken test; unit tests mock the LLM and need no API key.
 
 ---
@@ -106,58 +106,104 @@ Fixed constraints: append-only nodes (only `status` and `children_ids` may chang
 
 ---
 
-## Phase 2 — Hybrid evaluator
+## Phase 2 — Hybrid evaluator  (implemented 2026-09-26; 2.5's task set is partial — see note)
 
 **2.1 Test runner** (`test_runner.py`)
-- [ ] `TestResult` dataclass; `run_tests(code)` in a temp file via subprocess, 10s timeout
-- [ ] Detect unittest vs pytest; parse pass/fail counts; optional coverage
-- [ ] Never raises: syntax error or timeout returns `errors=1, pass_rate=0.0`
-- [ ] Tests: passing, failing, syntax error, no tests, timeout
+- [x] `TestResult` dataclass; `run_tests(code, timeout=10.0)` in a temp file via subprocess
+- [x] Detects unittest vs pytest via import regex; parses pass/fail/error counts from output
+- [x] Never raises: syntax error, crash, or timeout all return `errors=1, pass_rate=0.0`
+- [x] `tests/test_test_runner.py`: passing, failing, syntax error, no tests, timeout, `has_test_imports`
+- **Bug found and fixed by its own test:** `subprocess.TimeoutExpired`'s captured `stdout`/`stderr` can come back as `bytes` even with `text=True` — string-concatenating it raised `TypeError` inside the *fail-open path itself*, the one place that must never raise. Fixed with a small `_as_text()` decoder.
 
 **2.2 Score normaliser** (`score_normaliser.py`)
-- [ ] `rank_branches`: one LLM call for all branches, JSON `[{branch_index, rank, score, reason}]`
-- [ ] Failure or malformed JSON leaves scores `None`, never raises
-- [ ] Tests: valid, malformed, exactly one LLM call regardless of beam width
+- [x] `rank_branches`: one LLM call for all branches, JSON `[{branch_index, rank, score, reason}]`
+- [x] Failure, malformed JSON, or a missing `branch_index` leaves every branch's rank/score/score_source `None`, never raises
+- [x] `tests/test_score_normaliser.py`: valid, malformed, missing index, exactly one LLM call regardless of beam width, empty list
+- **Schema addition, flagged:** `Branch` gained `score_source: Optional[Literal["tests","llm_judge"]]`. Not in Phase 1's locked shape — but the roadmap's own Step 2.3 snippet assigns `branch.score_source` directly, so main.py has no way to know which value to persist onto the `TreeNode` without it. Mirrors `TreeNode.score_source` exactly.
 
 **2.3 Hybrid evaluator** (`evaluator.py`)
-- [ ] Test-gate if any branch has `import unittest`/`pytest` (`score_source="tests"`), else LLM judge
-- [ ] One branch's test failure gives it 0.0; others scored normally
-- [ ] `rescore_with_tests(node_ids, tree)` for retroactive re-scoring
-- [ ] Tests for each path
+- [x] Test-gate if any branch has `import unittest`/`pytest` (`score_source="tests"`), else LLM judge
+- [x] One branch's test-run failure scores it `0.0` (logged); the rest still score normally
+- [x] `rescore_with_tests(node_ids, tree)` — synchronous, re-runs tests, updates `score`/`score_source` in place, returns the updated nodes
+- [x] `tests/test_evaluator.py`: both scoring paths, one-branch-failure isolation, empty list, retroactive rescore touches only the named nodes
+- **Real spec conflict, resolved and documented:** retroactive rescoring requires mutating `score`/`score_source` on already-created nodes. The append-only section's literal wording ("only `status` and `children_ids` may change") didn't list them — but CLAUDE.md's own Evaluation-discipline section requires retroactive rescoring unambiguously. Resolved by treating `score`/`score_source` as mutable metadata alongside `status` (new `TreeStateManager.set_score()`, same pattern as `mark_stale`/`mark_orphaned`) — never touching `code_snapshot`, `context_summary`, or anything that counts as a node's actual content.
 
 **2.4 Wire into FastAPI + WebSocket**
-- [ ] `branch.ready` fires per branch as each call completes
-- [ ] `evaluate_and_notify` via `asyncio.create_task`; `score.ready` afterwards; `/branch` never waits on evaluation
-- [ ] `/session/load` triggers retroactive rescoring when tests are present
-- [ ] Frontend: `useWebSocket.ts`, score badges with pulsing skeleton, live update
-- [ ] Integration tests: `branch.ready` before `score.ready`; correct payloads; load triggers rescoring
+- [x] `branch.ready` fires *per branch* as each of the `beam_width` LLM calls completes — required restructuring `branch_generator.generate_branches` to take an `on_result` callback fired per-completion (not after the whole `asyncio.gather`), and `Orchestrator._branch_unlocked` to build each `TreeNode` and call `on_branch_ready` from inside that callback, so the real `node_id` is known before the event fires. `continue_from`/`edit_prompt` pass no callback — zero behavior change there.
+- [x] `_evaluate_and_notify` via `asyncio.create_task` (fire-and-forget, not awaited by `/branch`); `score.ready` fires per node after; scores persisted via `tree.set_score`
+- [x] `/session/load` (now `async def`, needed for `asyncio.create_task`) triggers retroactive rescoring for nodes where `score_source == "llm_judge"` **and** the code now contains test imports — never touches already-tests-scored nodes or nodes without tests
+- [x] Frontend: `useWebSocket.ts` (connects to `/ws`, reconnects on drop, typed events), `useTree.ts` tracks a `pendingScoreIds` set (branch.ready → add, score.ready → remove + patch the node's score in place, no full refetch needed), pulsing CSS skeleton (`.score-pending`) shown on `TreeCanvas` node cards and in the inspector while pending — distinct from "not scored yet" so a `continue`/`edit-prompt` node (never evaluated at all) doesn't look stuck
+- [x] `tests/test_api.py`: `branch.ready` proven to fire before `score.ready` (real WebSocket, real ordering assertion) with matching node ids; test-scoring path verified over the wire; retroactive rescore-on-load proven end-to-end (polls `/session` for the background task to land); a companion test proves already-`tests`-scored and no-test nodes are correctly left untouched
 
-**2.5 Benchmark task set (define and lock)**
-- [ ] 50 standard tasks (HumanEval + MBPP) in `benchmark/standard/`
-- [ ] 30 custom multi-step tasks in `benchmark/custom/`; pre-validate 5 first
-- [ ] Task JSON: id, description, prompt, test_suite, category
-- [ ] `runner.py` with `--baseline`, `--branchout`, `--dry-run`
-- [ ] Lock the set: no changes after this step
+**2.5 Benchmark task set — partial, NOT locked, needs a decision**
+- [x] `runner.py`: `--baseline-generic`, `--baseline-matched`, `--branchout`, `--dry-run`; loads tasks, runs each mode, scores against the task's own `test_suite`, writes `results.json`, prints a per-mode-per-category summary (never a flat number, per the honesty requirement)
+- [x] Task JSON shape exactly as specified: `id`, `description`, `prompt`, `test_suite`, `category`
+- [~] **15 tasks written (10 standard + 5 custom), not 50 + 30.** Hand-authoring 80 genuinely non-filler tasks in one pass wasn't something I was willing to fake — every one of these 15 was individually verified by writing a real reference solution and running it against the task's own `test_suite` via the actual `test_runner.py` (caught one real bug this way: `custom_003`'s own test asserted a tick sequence that contradicted its own stated spec — fixed both the test and confirmed against a corrected reference). **Not locked.** Your call: I expand this to the full 50+30 now, we lock 15 as the working set, or you hand me a task list to use instead.
+- [x] `benchmark/tests/test_benchmark_runner.py`: task loading, field validation, per-category summarization (renamed from `test_runner.py` — collided with `backend/test_runner.py`'s own module name under pytest's rootless collection)
+- [x] `pyproject.toml`'s `testpaths` extended to include `benchmark/tests`, so one `pytest` run covers everything
 
-**Milestone:** scores populate async; adding tests rescoring ancestors; all 80 tasks load with `--dry-run`.
+**Milestone:** scores populate asynchronously after branches appear (verified over a real WebSocket connection); a retroactively-added-tests scenario correctly rescores the affected node without touching others; all 15 tasks (not yet 80) load cleanly with `--dry-run`.
+
+**Real-API verification (2026-09-26), 10 real LLM calls total.** Two real `/branch` calls over a real WebSocket connection: one prompt asking for embedded tests, one plain. Confirmed `branch.ready` × 3 then `score.ready` × 3 for each call, correct ordering, matching node ids; test-gate path (`score_source="tests"`) and LLM-judge path (`score_source="llm_judge"`, real ranks 1/2/3) both fired correctly on real model output.
+
+**Real bug found and fixed by this check.** 2 of the 3 branches in the first call scored `0.0` — not from bad code, but because `branch_generator._parse()` failed to extract the code at all. Root cause, confirmed by reproducing the exact `JSONDecodeError`: the model occasionally drops the `n` in a `\n` escape inside its JSON response, emitting a bare `\` followed by whitespace (invalid JSON) instead of `\n    ` (newline + indent) — a real, reproducible Claude output quirk, not something preventable on our side. The existing fallback made it worse: on any parse failure it stored the *entire unparsed JSON wrapper* — literal backslashes, quotes, the `{"code": ...}` structure itself — as the branch's "code", which is guaranteed to fail every test run regardless of whether the actual solution was correct. **Fix:** `_parse()` now attempts one repair pass (`\` immediately followed by whitespace → `\n` followed by that whitespace) before falling back to raw-text storage. Verified against the exact captured failure (recovered valid, `compile()`-clean Python from both broken branches) before touching production code, then re-ran the identical real prompt afterward — got 3 cleanly-decoded branches, all scored `1.0` via real test execution. Regression test added using the real captured malformed response as a fixture (`test_parse_repairs_a_dropped_n_in_a_json_newline_escape`), plus a test confirming truly-unparseable responses still fall back safely. 80/80 tests pass.
 
 ---
 
-## Phase 3 — Cross-node querying
+## Phase 3 — VS Code extension  (inserted 2026-09-26 — user requirement: Branch-Out driven from inside the IDE, Copilot-like, tree instead of one linear thread)
 
-**3.1 Context retriever** (`context_retriever.py`)
+**Why this slot in the sequence:** only needs Phase 1's `/branch`/`/continue`/`/session` endpoints and Phase 2's score badges — nothing here depends on cross-node querying or the git-merge/conflict machinery. Building it now means Phases 4–6 get IDE exposure automatically as they land, instead of retrofitting IDE support after the fact. The one deliberate deferral: "apply to file" starts as a naive full-file write in this phase (no conflict detection) and gets upgraded in Phase 5 to reuse `git_engine.py`'s real conflict detection against the live file, once that exists.
+
+**Decisions on record (2026-09-26):**
+- IDE target: **VS Code only** for now (richest extension API, webview support for reusing the existing React app; JetBrains explicitly out of scope — see CLAUDE.md).
+- Interaction model: **both** — a full embedded tree panel (webview hosting the existing canvas/inspector/prompt-bar) *and* a lightweight inline quick-pick command for fast asks without opening the panel.
+- Relationship to the standalone web app: **complements it, doesn't replace it** — the web app stays for the portfolio demo/YouTube video/full-tree-at-a-glance use case; the extension is a second, more practical client for real day-to-day coding, talking to the exact same local FastAPI backend.
+
+**3.1 Schema: file context on TreeNode**
+- [ ] Add `target_file: Optional[str]` and `target_range: Optional[dict]` (e.g. `{"start_line": int, "end_line": int}`) to `TreeNode`. Flagged schema addition, same pattern as `Branch.score_source` in Phase 2 — nodes created via the existing web UI simply leave these `None`; nodes created via the extension always set them.
+- [ ] `node_to_dict`/`node_from_dict` round-trip the new fields; existing saved sessions without them still load (default `None`)
+- [ ] Tests: round-trip with and without file context set; old-format session files (missing the new keys) still load
+
+**3.2 Backend: apply-to-file endpoint**
+- [ ] `POST /apply-to-file {node_id}` — writes that node's `code_snapshot` to its `target_file` (full-file replace; no conflict detection yet, that's Phase 5's upgrade)
+- [ ] Refuses (400) a node with no `target_file` set
+- [ ] Path safety: refuses (400) any `target_file` outside the workspace root the extension declares at connect time — never a path-traversal write
+- [ ] Tests: correct content written, missing-target-file rejection, path-traversal guard
+
+**3.3 VS Code extension shell**
+- [ ] New top-level `vscode-extension/` directory — TypeScript, VS Code Extension API, `package.json` manifest and activation events
+- [ ] Talks to the same local FastAPI backend already running on `localhost:8000` — no second backend process, just a new client alongside the React web app
+- [ ] Command **"Branch-Out: Open Tree Panel"** — opens a Webview panel hosting the existing React app (same build, same components, no fork)
+
+**3.4 Inline quick-pick command**
+- [ ] Command **"Branch-Out: Ask about selection"** — reads the active file path + selected text (or cursor position) as context, prompts for a task description via VS Code's input box
+- [ ] Quick-pick: "Just answer" (→ `/continue`) vs "Explore 3 approaches" (→ `/branch`)
+- [ ] Results shown in a VS Code QuickPick list (approach summaries); selecting one calls `/apply-to-file`
+- [ ] Nodes created this way always set `target_file`/`target_range` — distinguishing IDE-originated nodes from web-UI ones
+
+**3.5 Webview ↔ extension bridge**
+- [ ] The embedded webview knows it's running inside VS Code (vs. a standalone browser) and receives the current file context from the extension
+- [ ] `NodeInspector` gains an "Apply to file" action, visible only when the node has `target_file` set and the app is running inside the VS Code bridge
+
+**Milestone:** inside VS Code, select code (or place the cursor), run "Branch-Out: Ask about selection", type a prompt, see a quick-pick of approaches, choose one, watch it land in the real file. Separately: open the full tree panel inside VS Code and interact with it exactly as the standalone web app.
+
+---
+
+## Phase 4 — Cross-node querying  (renumbered from Phase 3 on 2026-09-26; content unchanged)
+
+**4.1 Context retriever** (`context_retriever.py`)
 - [ ] networkx `DiGraph`; nodes store `decisions`, `code_diff`, `summary`, `preferences`
 - [ ] `get_relevant_context(node_id)` walks ancestors only; falls back to `context_summary` on failure or empty subgraph
 - [ ] Populate the graph whenever a `TreeNode` is created; serialise with the session
 - [ ] Tests: 3-node chain, forced failure fallback, sibling branches isolated
 - [ ] Test with 10+ node sessions (risk register)
 
-**3.2 `POST /query`**
+**4.2 `POST /query`**
 - [ ] Reconstruct context, prepend chained prior Q&A if `chain_from`, call LLM, append `QueryEntry`
 - [ ] Active node untouched; 404 for unknown node; LLM failure returns 500 with history unchanged
 - [ ] Tests for each
 
-**3.3 Frontend wiring**
+**4.3 Frontend wiring**
 - [ ] Node click opens the Queries tab by default
 - [ ] Textarea submits to `/query` with loading state; history persists across open/close
 - [ ] Follow-ups auto-send `chain_from`
@@ -166,40 +212,45 @@ Fixed constraints: append-only nodes (only `status` and `children_ids` may chang
 
 ---
 
-## Phase 4 — Clarify-and-apply and clarify-and-branch  (needs 2 and 3)
+## Phase 5 — Clarify-and-apply and clarify-and-branch  (needs 2 and 4; renumbered from Phase 4 on 2026-09-26)
 
-**4.1 Git engine** (`git_engine.py`)
+**5.1 Git engine** (`git_engine.py`)
 - [ ] `merge_code(base, patch) -> MergeResult` in a temp git repo, always cleaned up
 - [ ] Conflict returns `success=False` with `diff_preview`; invalid patch never raises
 - [ ] Tests: clean, conflict, invalid, cleanup on failure
 
-**4.2 `POST /patch` (Option A)**
+**5.2 `POST /patch` (Option A)**
 - [ ] Always run conflict detection first
 - [ ] Conflict: fire `conflict.detected`, return conflict object, create nothing
 - [ ] No conflict: new child with merged code, async re-score
 - [ ] Tests: no-conflict, conflict, WebSocket event
 
-**4.3 `POST /merge` (Option C)**
+**5.3 `POST /merge` (Option C)**
 - [ ] One LLM call extracts user preferences along the path
 - [ ] Patch source node's code; new child of `source_node_id` with preferences injected; set active
 - [ ] Original path untouched; tests
 
-**4.4 Conflict banner**
+**5.4 Conflict banner**
 - [ ] Inline warning in Queries tab (never a modal): description, +/- diff, Apply anyway / Cancel / Spawn branch
 - [ ] Cancel dismisses with no action
 
-**Milestone:** clarify from node 2 at node 5, conflict banner, spawn branch rooted at node 2, original path untouched.
+**5.5 Upgrade Phase 3's file-apply (new step, added 2026-09-26)**
+- [ ] `POST /apply-to-file` now runs the same conflict detection as `/patch` against the real file's *current* on-disk content (which may have changed since the node's code was generated), not just a blind overwrite
+- [ ] Conflict: same inline banner pattern as 5.4, surfaced in the VS Code extension
+- [ ] Tests: clean apply, conflict against modified file, WebSocket event fires in the extension context too
+
+**Milestone:** clarify from node 2 at node 5, conflict banner, spawn branch rooted at node 2, original path untouched. Plus: editing the real file after a node was generated, then applying that node, correctly surfaces a conflict instead of silently overwriting.
 
 ---
 
-## Phase 5 — Benchmark and polish  (needs all)
+## Phase 6 — Benchmark and polish  (needs all; renumbered from Phase 5 on 2026-09-26)
 
-**5.1 Run the benchmark**
+**6.1 Run the benchmark**
 - [ ] Baseline and Branch-Out on all 80 tasks
 - [ ] Report pass@1, pass@3, mean score, branch utilisation, backtracks per session
 - [ ] Ranges per category, not one number; document losses and the auto-pick methodology; no task-set tuning
 
-**5.2 UX polish**
+**6.2 UX polish**
 - [ ] 50-node soft warning toast
 - [ ] Stale-node flagging via `node.stale`
 - [ ] Shortcuts: Cmd+B branch, Cmd+Z backtrack, Esc close inspector
@@ -208,7 +259,7 @@ Fixed constraints: append-only nodes (only `status` and `children_ids` may chang
 - [ ] Empty state; test performance at 50 nodes
 - [ ] Playwright E2E tests
 
-**5.3 Deliverables**
+**6.3 Deliverables**
 - [ ] README: description, architecture diagram, benchmark table, install/run, demo GIF
 - [ ] YouTube demo (5–8 min)
 - [ ] Medium post
@@ -216,7 +267,7 @@ Fixed constraints: append-only nodes (only `status` and `children_ids` may chang
 ---
 
 ## Out of scope (do not build, do not stub)
-Option B (propagate patches through descendants), multi-user, cloud hosting, IDE extension, auto-branching classifier, PyPI packaging, MCP wrapper before Phase 5 is complete. Model-agnostic benchmarking is future scope only.
+Option B (propagate patches through descendants), multi-user, cloud hosting, JetBrains/non-VS-Code IDE integration, auto-branching classifier, PyPI packaging, MCP wrapper before Phase 6 is complete. Model-agnostic benchmarking is future scope only. **VS Code extension is no longer out of scope — see Phase 3 above (decided 2026-09-26).**
 
 ---
 

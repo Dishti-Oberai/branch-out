@@ -1,0 +1,7 @@
+{
+  "id": "standard_005",
+  "description": "Anagram check",
+  "prompt": "Write a Python function `is_anagram(a: str, b: str) -> bool` that returns True if `a` and `b` are anagrams of each other, ignoring case and spaces.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_simple(self):\n        self.assertTrue(is_anagram('listen', 'silent'))\n    def test_case_insensitive(self):\n        self.assertTrue(is_anagram('Dormitory', 'Dirty Room'))\n    def test_not_anagram(self):\n        self.assertFalse(is_anagram('hello', 'world'))\n    def test_different_lengths(self):\n        self.assertFalse(is_anagram('abc', 'abcd'))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

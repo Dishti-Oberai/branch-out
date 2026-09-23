@@ -1,0 +1,7 @@
+{
+  "id": "custom_004",
+  "description": "Arithmetic expression evaluator (multi-step: parsing + evaluation, operator precedence)",
+  "prompt": "Write a Python function `evaluate(expr: str) -> float` that evaluates a simple arithmetic expression string containing non-negative numbers, '+', '-', '*', '/', and parentheses, respecting standard operator precedence. Do not use `eval()` or `exec()`.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_precedence(self):\n        self.assertEqual(evaluate('2 + 3 * 4'), 14)\n    def test_parens(self):\n        self.assertEqual(evaluate('(2 + 3) * 4'), 20)\n    def test_division(self):\n        self.assertEqual(evaluate('10 / 2 - 1'), 4)\n    def test_nested_parens(self):\n        self.assertEqual(evaluate('((1 + 2) * (3 + 4))'), 21)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

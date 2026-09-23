@@ -6,10 +6,11 @@ import { deriveNodeTitle } from "../nodeTitle";
 
 interface Data {
   node: TreeNode;
+  pending: boolean;
 }
 
 function BranchNode({ data }: NodeProps<Data>) {
-  const { node } = data;
+  const { node, pending } = data;
   const title = deriveNodeTitle(node);
   return (
     <div className={`bo-node ${node.status}`}>
@@ -18,7 +19,11 @@ function BranchNode({ data }: NodeProps<Data>) {
       <div className="label">{title ?? node.branch_label}</div>
       <div className="sub">
         <span className="branch-tag">{node.branch_label}</span> · {node.id}
-        {node.score !== null ? <span className="score"> · {node.score}</span> : null}
+        {pending ? (
+          <span className="score score-pending"> · evaluating…</span>
+        ) : node.score !== null ? (
+          <span className="score"> · {node.score.toFixed(2)}</span>
+        ) : null}
       </div>
       {/* Visible only on hover (pure CSS — see .bo-node .explore rules),
           fully inside the node's own box. Its click is handled by a
@@ -75,10 +80,12 @@ function layout(nodes: TreeNode[]): Map<string, { x: number; y: number }> {
 
 export default function TreeCanvas({
   nodes,
+  pendingScoreIds,
   onSelect,
   onExplore,
 }: {
   nodes: TreeNode[];
+  pendingScoreIds: Set<string>;
   onSelect: (id: string) => void;
   onExplore: (id: string) => void;
 }) {
@@ -88,7 +95,7 @@ export default function TreeCanvas({
       id: n.id,
       type: "branch",
       position: pos.get(n.id) ?? { x: 0, y: 0 },
-      data: { node: n },
+      data: { node: n, pending: pendingScoreIds.has(n.id) },
     }));
     const rfEdges: Edge[] = nodes
       .filter((n) => n.parent_id)
@@ -100,7 +107,7 @@ export default function TreeCanvas({
         style: edgeStyle(n.status),
       }));
     return { rfNodes, rfEdges };
-  }, [nodes]);
+  }, [nodes, pendingScoreIds]);
 
   // Handles the Explore-alternatives click at the CAPTURE phase, on an
   // element ABOVE React Flow's entire rendered tree. Why: React Flow (via

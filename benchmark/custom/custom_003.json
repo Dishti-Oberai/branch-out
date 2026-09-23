@@ -1,0 +1,7 @@
+{
+  "id": "custom_003",
+  "description": "Traffic light state machine (multi-step: state + timing rules)",
+  "prompt": "Implement a class `TrafficLight` that starts in state 'red'. It has a method `tick(self) -> str` that advances the light by one time unit and returns the new state. The cycle is: red for 3 ticks, then green for 2 ticks, then yellow for 1 tick, then back to red, repeating forever.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_full_cycle(self):\n        t = TrafficLight()\n        seq = [t.tick() for _ in range(6)]\n        self.assertEqual(seq, ['red','red','red','green','green','yellow'])\n    def test_wraps_around(self):\n        t = TrafficLight()\n        for _ in range(6):\n            t.tick()\n        self.assertEqual(t.tick(), 'red')\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

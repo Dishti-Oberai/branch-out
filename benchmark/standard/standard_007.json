@@ -1,0 +1,7 @@
+{
+  "id": "standard_007",
+  "description": "Prime sieve",
+  "prompt": "Write a Python function `primes_up_to(n: int) -> list[int]` that returns all prime numbers less than or equal to `n`, using the Sieve of Eratosthenes.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_small(self):\n        self.assertEqual(primes_up_to(10), [2,3,5,7])\n    def test_one(self):\n        self.assertEqual(primes_up_to(1), [])\n    def test_two(self):\n        self.assertEqual(primes_up_to(2), [2])\n    def test_thirty(self):\n        self.assertEqual(primes_up_to(30), [2,3,5,7,11,13,17,19,23,29])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

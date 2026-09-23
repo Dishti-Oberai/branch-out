@@ -1,0 +1,7 @@
+{
+  "id": "standard_008",
+  "description": "Quicksort",
+  "prompt": "Write a Python function `quicksort(arr: list[int]) -> list[int]` that returns a new list containing the elements of `arr` sorted in ascending order, implemented with the quicksort algorithm (not `sorted()`).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_unsorted(self):\n        self.assertEqual(quicksort([5,2,8,1,9,3]), [1,2,3,5,8,9])\n    def test_already_sorted(self):\n        self.assertEqual(quicksort([1,2,3]), [1,2,3])\n    def test_reverse_sorted(self):\n        self.assertEqual(quicksort([3,2,1]), [1,2,3])\n    def test_duplicates(self):\n        self.assertEqual(quicksort([2,1,2,1]), [1,1,2,2])\n    def test_empty(self):\n        self.assertEqual(quicksort([]), [])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

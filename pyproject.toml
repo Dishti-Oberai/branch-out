@@ -6,4 +6,4 @@ requires-python = ">=3.10"  # 3.10 floor set by Tokenetics, which will drive con
 
 [tool.pytest.ini_options]
 pythonpath = ["backend"]
-testpaths = ["backend/tests"]
+testpaths = ["backend/tests", "benchmark/tests"]

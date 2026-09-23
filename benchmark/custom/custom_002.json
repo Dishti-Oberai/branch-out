@@ -1,0 +1,7 @@
+{
+  "id": "custom_002",
+  "description": "LRU cache (multi-step: needs both eviction policy and O(1) access)",
+  "prompt": "Implement a class `LRUCache(capacity: int)` with `get(key) -> value or -1 if missing` and `put(key, value)` methods. When the cache exceeds `capacity`, evict the least recently used entry. Both `get` and `put` must run in O(1) time on average.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_basic_get_put(self):\n        c = LRUCache(2)\n        c.put(1, 'a')\n        c.put(2, 'b')\n        self.assertEqual(c.get(1), 'a')\n    def test_eviction(self):\n        c = LRUCache(2)\n        c.put(1, 'a')\n        c.put(2, 'b')\n        c.get(1)          # 1 is now most-recently-used\n        c.put(3, 'c')      # evicts 2, not 1\n        self.assertEqual(c.get(2), -1)\n        self.assertEqual(c.get(1), 'a')\n        self.assertEqual(c.get(3), 'c')\n    def test_missing_key(self):\n        c = LRUCache(1)\n        self.assertEqual(c.get(99), -1)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

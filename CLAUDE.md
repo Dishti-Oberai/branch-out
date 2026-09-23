@@ -8,7 +8,7 @@ Guidance for Claude Code when working in this repository. This file governs *how
 
 Branch-Out is a full-stack coding agent that makes AI coding sessions a tree instead of a linear conversation. Users can branch into multiple approaches at any point, backtrack to any past node, and query past decisions without losing current state.
 
-**Stack:** React (frontend) · Python / FastAPI (backend) · Claude API (`claude-sonnet-4-6`) · networkx (context graph) · SQLite (session persistence) · gitpython (code merge)
+**Stack:** React (frontend) · Python / FastAPI (backend) · Claude API (`claude-sonnet-4-6`) · networkx (context graph) · SQLite (session persistence) · gitpython (code merge) · TypeScript / VS Code Extension API (IDE integration, Phase 3 — decided 2026-09-26, see Scope discipline below)
 
 **Portfolio context:** This is a solo portfolio project. Every engineering decision has a reason — understand it before changing it.
 
@@ -191,7 +191,9 @@ The graph is in-memory during a session and serialised as part of `session.py`'s
 
 Follow ROADMAP.md exactly. The phase gates are real — do not start Phase N+1 before Phase N's milestone is verified working end-to-end:
 
-**Phase 1 (core tree)** → **Phase 2 (evaluator)** and **Phase 3 (cross-node querying)** can be built in parallel → **Phase 4 (patches)** requires both 2 and 3 → **Phase 5 (benchmark + polish)** requires all.
+**Phase 1 (core tree)** → **Phase 2 (evaluator)** → **Phase 3 (VS Code extension)**, which only needs Phases 1–2's endpoints → **Phase 4 (cross-node querying)** can be built independently of Phase 3, any time after Phase 2 → **Phase 5 (patches)** requires both 2 and 4, and upgrades Phase 3's naive file-apply to use its conflict-detection machinery → **Phase 6 (benchmark + polish)** requires all.
+
+Phase 3 was inserted ahead of the original Phase 3 (cross-node querying, now Phase 4) on 2026-09-26 — see ROADMAP.md's Phase 3 section for the reasoning. It only depends on already-built Phase 1/2 endpoints, so it doesn't block on anything later in the sequence.
 
 The specific build order within each phase is in ROADMAP.md. Don't reshuffle it.
 
@@ -203,9 +205,10 @@ The project must be demoable against the real Claude API from Phase 1 onward:
 
 - Phase 1 milestone: a working branching session in the browser — branch, pick, backtrack, save, reload.
 - Phase 2 milestone: scores populate async after branching. Retroactive re-scoring fires when tests are added.
-- Phase 3 milestone: click a past node, ask it a question, get a coherent answer, current node untouched.
-- Phase 4 milestone: clarify from a past node, apply to current (Option A), and spawn a new branch (Option C).
-- Phase 5 milestone: benchmark runner produces real numbers comparing linear baseline vs. Branch-Out.
+- Phase 3 milestone: inside VS Code, select code (or place cursor), ask a question, pick from a quick-pick of approaches (or open the full tree panel), watch the result land in the real file.
+- Phase 4 milestone: click a past node, ask it a question, get a coherent answer, current node untouched.
+- Phase 5 milestone: clarify from a past node, apply to current (Option A), and spawn a new branch (Option C) — plus Phase 3's file-apply upgraded to use the same conflict detection.
+- Phase 6 milestone: benchmark runner produces real numbers comparing linear baseline vs. Branch-Out.
 
 Never let the project go dark — it should be runnable at every phase boundary.
 
@@ -217,13 +220,15 @@ Never let the project go dark — it should be runnable at every phase boundary.
 - Option B (patch any node and propagate forward through descendants)
 - Multi-user collaboration
 - Cloud deployment or hosting
-- VS Code / IDE extension
+- JetBrains or any non-VS-Code IDE integration (VS Code was the explicit choice — see Phase 3)
 - Auto-branching classifier (proactive branch suggestions)
-- Any MCP server wrapper until Phase 5 is complete
+- Any MCP server wrapper until Phase 6 is complete
 
 **Explicitly deferred to future scope only:**
 - Model-agnostic benchmarking (swap `ClaudeClient` for GPT-4 implementation)
-- Branch merge (git merge + LLM context synthesis) — designed and documented but not built until Phase 5 polish
+- Branch merge (git merge + LLM context synthesis) — designed and documented but not built until Phase 6 polish
+
+**Decision on record (2026-09-26): VS Code / IDE extension is no longer out of scope.** It was on this list; the user explicitly asked for it (Branch-Out driven from inside the IDE, Copilot-like, applying chosen branches to real files) and it's now a real, scheduled phase — see ROADMAP.md's Phase 3. Removing it from "do not build" here rather than leaving a stale rule that contradicts a phase that actually exists in the roadmap.
 
 Do not scope-creep. If a feature is not in ROADMAP.md's current phase, do not build it.
 

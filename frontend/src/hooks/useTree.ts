@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TreeNode } from "../types";
+import { useTreeWebSocket, type BranchOutEvent } from "./useWebSocket";
 
 const API = "http://localhost:8000";
 
@@ -19,6 +20,12 @@ export function useTree() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Step 2.4: node ids whose score is still being evaluated in the
+  // background (from branch.ready until score.ready arrives), so the UI
+  // can show "evaluating…" rather than a bare "not scored" that looks
+  // identical to a node that will never be scored (continue/edit-prompt
+  // nodes never go through the evaluator at all).
+  const [pendingScoreIds, setPendingScoreIds] = useState<Set<string>>(new Set());
   // Step 1.10: lets the caller abort the in-flight request (the backend
   // detects the dropped connection via request.is_disconnected() and
   // cancels the outstanding branch generation).
@@ -53,10 +60,34 @@ export function useTree() {
     refresh().catch(() => setError("Backend not reachable on :8000"));
   }, [refresh]);
 
+  const handleWsEvent = useCallback((event: BranchOutEvent) => {
+    if (event.event === "branch.ready") {
+      setPendingScoreIds((prev) => {
+        const next = new Set(prev);
+        next.add(event.branch.node_id);
+        return next;
+      });
+    } else {
+      setPendingScoreIds((prev) => {
+        if (!prev.has(event.node_id)) return prev;
+        const next = new Set(prev);
+        next.delete(event.node_id);
+        return next;
+      });
+      setNodes((prev) => prev.map((n) =>
+        n.id === event.node_id
+          ? { ...n, score: event.score, score_source: event.score_source }
+          : n
+      ));
+    }
+  }, []);
+  useTreeWebSocket(handleWsEvent);
+
   const active = nodes.find((n) => n.status === "active") ?? null;
 
   return {
     nodes,
+    pendingScoreIds,
     active,
     selectedId,
     selected: nodes.find((n) => n.id === selectedId) ?? null,

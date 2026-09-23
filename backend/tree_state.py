@@ -94,6 +94,20 @@ class TreeStateManager:
         target.status = "active"
         self.active_id = node_id
 
+    def set_score(self, node_id: str, score: Optional[float], score_source: Optional[str]) -> None:
+        """Phase 2: updates `score`/`score_source` only.
+
+        These join `status` and `children_ids` as the mutable-metadata
+        exception to the append-only rule — required for retroactive
+        rescoring (CLAUDE.md's Evaluation discipline section), which by
+        definition means updating an already-created node's score. Never
+        touches `code_snapshot`, `context_summary`, or anything else that
+        counts as the node's actual content.
+        """
+        node = self._raw(node_id)
+        node.score = score
+        node.score_source = score_source
+
     def mark_stale(self, node_ids: List[str]) -> None:
         for nid in node_ids:
             self._raw(nid).status = "stale"

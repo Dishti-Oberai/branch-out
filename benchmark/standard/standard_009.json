@@ -1,0 +1,7 @@
+{
+  "id": "standard_009",
+  "description": "Longest common prefix",
+  "prompt": "Write a Python function `longest_common_prefix(strs: list[str]) -> str` that returns the longest common prefix string among a list of strings. Return an empty string if there is no common prefix or the list is empty.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_common(self):\n        self.assertEqual(longest_common_prefix(['flower','flow','flight']), 'fl')\n    def test_no_common(self):\n        self.assertEqual(longest_common_prefix(['dog','racecar','car']), '')\n    def test_single(self):\n        self.assertEqual(longest_common_prefix(['single']), 'single')\n    def test_empty_list(self):\n        self.assertEqual(longest_common_prefix([]), '')\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

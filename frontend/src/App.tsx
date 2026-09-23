@@ -47,11 +47,19 @@ export default function App() {
     <div className="app">
       <StatusBar nodes={tree.nodes} active={tree.active} />
       <div className="main">
-        <div className="canvas"><TreeCanvas nodes={tree.nodes} onSelect={select} onExplore={explore} /></div>
+        <div className="canvas">
+          <TreeCanvas
+            nodes={tree.nodes}
+            pendingScoreIds={tree.pendingScoreIds}
+            onSelect={select}
+            onExplore={explore}
+          />
+        </div>
         {tree.selected && (
           <NodeInspector
             node={tree.selected}
             isActive={tree.selected.id === tree.active?.id}
+            pending={tree.pendingScoreIds.has(tree.selected.id)}
             onMakeActive={() => tree.backtrack(tree.selected!.id)}
             onClose={() => tree.select(null)}
             onEditPrompt={(newPrompt) => tree.editPrompt(tree.selected!.id, newPrompt)}

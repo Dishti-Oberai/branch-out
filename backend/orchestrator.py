@@ -1,9 +1,11 @@
 import asyncio
-from typing import List, Optional, Tuple
+from typing import Awaitable, Callable, List, Optional, Tuple
 
 from branch_generator import branch_label, generate_branches
 from models import DEFAULT_BEAM_WIDTH, Branch, TreeNode
 from tree_state import TreeStateManager
+
+OnBranchReady = Callable[[Branch], Awaitable[None]]
 
 
 class LLMGenerationFailed(RuntimeError):
@@ -38,20 +40,33 @@ class Orchestrator:
         node_id: str,
         prompt: str,
         beam_width: int = DEFAULT_BEAM_WIDTH,
+        on_branch_ready: Optional[OnBranchReady] = None,
     ) -> List[Branch]:
-        """Generate up to `beam_width` children of `node_id`. Never mutates existing code."""
+        """Generate up to `beam_width` children of `node_id`. Never mutates existing code.
+
+        `on_branch_ready`, if given, is awaited with each Branch (its
+        `node_id` already set) the moment that branch's node is created —
+        as each of the `beam_width` LLM calls completes, not after all of
+        them do. Step 2.4's `branch.ready` WebSocket event is wired through
+        this, not through a separate post-hoc loop.
+        """
         async with self._lock:
-            return await self._branch_unlocked(node_id, prompt, beam_width)
+            return await self._branch_unlocked(node_id, prompt, beam_width, on_branch_ready)
 
     async def _branch_unlocked(
-        self, node_id: str, prompt: str, beam_width: int
+        self,
+        node_id: str,
+        prompt: str,
+        beam_width: int,
+        on_branch_ready: Optional[OnBranchReady] = None,
     ) -> List[Branch]:
         parent = self.tree.get_node(node_id)
-        branches = await generate_branches(
-            prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width
-        )
         offset = len(parent.children_ids)
-        for i, b in enumerate(branches):
+        results: List[Optional[Branch]] = [None] * beam_width
+
+        async def on_result(i: int, b: Optional[Branch]) -> None:
+            if b is None:
+                return  # that call failed; already logged in branch_generator
             node = TreeNode(
                 id=self.tree.new_id(),
                 parent_id=parent.id,
@@ -67,7 +82,15 @@ class Orchestrator:
             )
             self.tree.add_node(node)
             b.node_id = node.id
-        return branches
+            results[i] = b
+            if on_branch_ready:
+                await on_branch_ready(b)
+
+        await generate_branches(
+            prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width,
+            on_result=on_result,
+        )
+        return [b for b in results if b is not None]
 
     async def continue_from(self, node_id: str, prompt: str) -> TreeNode:
         """Single LLM call, no branching: adds one new child of `node_id` and

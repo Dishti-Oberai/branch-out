@@ -6,12 +6,14 @@ import { deriveNodeTitle } from "../nodeTitle";
 export default function NodeInspector({
   node,
   isActive,
+  pending,
   onMakeActive,
   onClose,
   onEditPrompt,
 }: {
   node: TreeNode;
   isActive: boolean;
+  pending: boolean;
   onMakeActive: () => void;
   onClose: () => void;
   onEditPrompt: (newPrompt: string) => void;
@@ -60,8 +62,12 @@ export default function NodeInspector({
         )
       )}
       <h4>Score</h4>
-      <span className="score-badge">
-        {node.score === null ? "not scored yet" : `${node.score} · ${node.score_source}`}
+      <span className={`score-badge${pending ? " score-pending" : ""}`}>
+        {pending
+          ? "evaluating…"
+          : node.score === null
+            ? "not scored yet"
+            : `${node.score.toFixed(2)} · ${node.score_source}`}
       </span>
       <h4>Key decisions</h4>
       {node.user_preferences.length ? (
