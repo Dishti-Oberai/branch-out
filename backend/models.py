@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
+DEFAULT_BEAM_WIDTH = 3
+
+
+@dataclass
+class QueryEntry:
+    id: str
+    question: str
+    answer: str
+    timestamp: datetime
+    chained_from: Optional[str] = None  # ID of prior QueryEntry this builds on
+
+
+@dataclass
+class TreeNode:
+    id: str
+    parent_id: Optional[str]
+    children_ids: List[str]
+    code_snapshot: str
+    context_summary: str
+    user_preferences: List[str]  # Explicit decisions ("use Python 3.11")
+    score: Optional[float]
+    score_source: Optional[Literal["tests", "llm_judge"]]
+    status: Literal["active", "stale", "orphaned", "normal"]
+    query_history: List[QueryEntry]
+    branch_label: str  # "Branch A", "Branch B" etc.
+    created_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class Branch:
+    node_id: str
+    code: str
+    reasoning: str
+    score: Optional[float] = None
+    rank: Optional[int] = None  # Set by score_normaliser
+
+
+def _iso(d: Dict[str, Any], key: str) -> None:
+    if isinstance(d.get(key), datetime):
+        d[key] = d[key].isoformat()
+
+
+def node_to_dict(node: TreeNode) -> Dict[str, Any]:
+    d = asdict(node)
+    _iso(d, "created_at")
+    for q in d["query_history"]:
+        _iso(q, "timestamp")
+    return d
+
+
+def node_from_dict(d: Dict[str, Any]) -> TreeNode:
+    queries = [
+        QueryEntry(**{**q, "timestamp": datetime.fromisoformat(q["timestamp"])})
+        for q in d.get("query_history", [])
+    ]
+    return TreeNode(
+        **{
+            **d,
+            "query_history": queries,
+            "created_at": datetime.fromisoformat(d["created_at"]),
+        }
+    )
+
+
+def branch_to_dict(branch: Branch) -> Dict[str, Any]:
+    return asdict(branch)

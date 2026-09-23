@@ -1,0 +1,9 @@
+[project]
+name = "branch-out"
+version = "0.1.0"
+description = "Coding agent that turns a session into a tree: branch, backtrack, query past decisions."
+requires-python = ">=3.10"  # 3.10 floor set by Tokenetics, which will drive context compaction
+
+[tool.pytest.ini_options]
+pythonpath = ["backend"]
+testpaths = ["backend/tests"]

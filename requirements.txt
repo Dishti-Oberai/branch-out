@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+anthropic
+networkx
+gitpython
+coverage
+pytest
+python-dotenv
+websockets
+httpx
+tokenetics @ git+https://github.com/Dishti-Oberai/tokenetics.git
