@@ -103,6 +103,11 @@ export function useTree() {
     backtrack: (nodeId: string) => run((signal) => post("/backtrack", { node_id: nodeId }, signal)),
     editPrompt: (nodeId: string, newPrompt: string) =>
       run((signal) => post("/edit-prompt", { node_id: nodeId, new_prompt: newPrompt }, signal)),
+    // Step 3.5: only meaningful for nodes with target_file set (extension-
+    // originated). Doesn't change the tree, so it deliberately doesn't
+    // route through the same `run()`/busy-state wrapper as the mutating
+    // actions above — this writes to a file, not to the session.
+    applyToFile: (nodeId: string) => post<{ path: string }>("/apply-to-file", { node_id: nodeId }),
     save: () => run(() => post("/session/save", {})),
     load: (path: string) => run(async () => { await post("/session/load", { path }); }),
   };

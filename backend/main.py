@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import logging
-from typing import Optional, Set
+from pathlib import Path
+from typing import Dict, Optional, Set
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -10,8 +12,9 @@ from pydantic import BaseModel
 load_dotenv()
 
 from claude_client import ClaudeClient  # noqa: E402
+from codebase_context import gather_codebase_context  # noqa: E402
 from evaluator import evaluate_branches, rescore_with_tests  # noqa: E402
-from models import DEFAULT_BEAM_WIDTH, Branch, branch_to_dict, node_to_dict  # noqa: E402
+from models import DEFAULT_BEAM_WIDTH, Branch, TreeNode, branch_to_dict, node_to_dict  # noqa: E402
 from orchestrator import LLMGenerationFailed, Orchestrator  # noqa: E402
 from session import load_session, save_session  # noqa: E402
 from test_runner import has_test_imports  # noqa: E402
@@ -21,13 +24,38 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Branch-Out")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    # Phase 3 real bug (2026-09-26): the VS Code webview's origin is
+    # something like vscode-webview://<random-id>, not http://localhost:5173
+    # — allowlisting only the web app's dev-server origin meant every fetch
+    # from the embedded tree panel was silently CORS-rejected, surfacing in
+    # the browser as an opaque "Failed to fetch" with no useful detail.
+    # This is a local-only single-user dev tool with no cookies/credentials
+    # (allow_credentials defaults to False), so a wildcard origin is the
+    # simple, correct fix rather than trying to track VS Code's webview
+    # origin format (which isn't guaranteed stable across versions).
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 _orchestrator: Optional[Orchestrator] = None
 DEFAULT_SESSION_PATH = "sessions/session.json"
+
+# Step 3.2: the VS Code extension declares its workspace root via POST
+# /workspace on activation. /apply-to-file refuses to write anywhere
+# outside it. Single-session POC scope, same as _ws_clients below — one
+# workspace root, not per-connection.
+_workspace_root: Optional[Path] = None
+
+# Step 3.9: the on-disk hash of a node's target_file at the moment that
+# node was created (None if the file didn't exist yet). Deliberately NOT
+# part of the persisted TreeNode schema — this is an interim, in-memory-
+# only safety net ahead of Phase 5's real git-merge conflict detection,
+# not something worth a schema field that Phase 5 will just delete. Lost
+# on restart or session load, same as the WebSocket client set below;
+# apply-to-file fails open (allows the write) for any node it has no
+# record for, rather than blocking things it can't reason about.
+_source_hashes: Dict[str, Optional[str]] = {}
 
 # How often to poll for a client disconnect while an LLM call is in flight.
 # Small enough to cancel promptly, large enough not to busy-loop.
@@ -46,6 +74,65 @@ def orch() -> Orchestrator:
     if _orchestrator is None:
         _orchestrator = Orchestrator(ClaudeClient())
     return _orchestrator
+
+
+def _resolve_target_path(target_file: str) -> Path:
+    """Step 3.2's path-safety check, shared by /apply-to-file and Step
+    3.9's hash capture. Raises HTTPException(400) if no workspace root has
+    been declared, or if the resolved path escapes it."""
+    if _workspace_root is None:
+        raise HTTPException(400, "No workspace root declared — call POST /workspace first")
+    candidate = Path(target_file)
+    target = candidate if candidate.is_absolute() else (_workspace_root / candidate)
+    target = target.resolve()
+    try:
+        target.relative_to(_workspace_root)
+    except ValueError:
+        raise HTTPException(400, f"target_file {target_file!r} is outside the workspace root")
+    return target
+
+
+def _splice_range(original: str, target_range: Dict[str, int], replacement: str) -> str:
+    """Step 3.2 fix (2026-09-27): a node created from a *selection* (not the
+    whole file) only ever holds that selection's code as `code_snapshot` —
+    the model was never shown the rest of the file, so it can't be trusted
+    to reproduce it. Applying `code_snapshot` as a full-file overwrite in
+    that case silently destroys everything outside the selection (real bug,
+    caught by the user: "the answer changes the file even if it is just a
+    question about what the file is" surfaced this exact class of damage).
+    Fix: when a node carries a `target_range`, splice its code into just
+    those lines instead of replacing the whole file. `target_range` is
+    1-indexed and inclusive on both ends, matching how quickPick.ts derives
+    it from a VS Code Selection.
+    """
+    lines = original.splitlines(keepends=True)
+    start = max(target_range["start_line"] - 1, 0)
+    end = min(target_range["end_line"], len(lines))
+    if replacement and not replacement.endswith("\n") and end < len(lines):
+        replacement += "\n"
+    return "".join(lines[:start] + [replacement] + lines[end:])
+
+
+def _hash_file(path: Path) -> Optional[str]:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None  # file doesn't exist (yet) — a legitimate, common case
+
+
+def _capture_source_hash(node: TreeNode) -> None:
+    """Step 3.9: records what target_file looked like when this node was
+    created, so /apply-to-file can later tell whether it's changed since.
+    A no-op for nodes without target_file, or before any workspace is
+    declared (nothing to hash against yet).
+    """
+    if not node.target_file or _workspace_root is None:
+        return
+    try:
+        target = _resolve_target_path(node.target_file)
+    except HTTPException:
+        return  # can't resolve it safely; just don't track it
+    _source_hashes[node.id] = _hash_file(target)
 
 
 async def _broadcast(event: str, payload: dict) -> None:
@@ -121,10 +208,18 @@ async def _rescore_and_notify(node_ids: list[str]) -> None:
         })
 
 
+class TargetRange(BaseModel):
+    start_line: int
+    end_line: int
+
+
 class BranchRequest(BaseModel):
     node_id: str
     prompt: str
     beam_width: int = DEFAULT_BEAM_WIDTH
+    target_file: Optional[str] = None
+    target_range: Optional[TargetRange] = None
+    include_codebase: bool = True
 
 
 class BacktrackRequest(BaseModel):
@@ -134,6 +229,9 @@ class BacktrackRequest(BaseModel):
 class ContinueRequest(BaseModel):
     node_id: str
     prompt: str
+    target_file: Optional[str] = None
+    target_range: Optional[TargetRange] = None
+    include_codebase: bool = True
 
 
 class EditPromptRequest(BaseModel):
@@ -149,17 +247,32 @@ class SaveRequest(BaseModel):
     path: str = DEFAULT_SESSION_PATH
 
 
+class WorkspaceRequest(BaseModel):
+    root: str
+
+
+class ApplyToFileRequest(BaseModel):
+    node_id: str
+
+
 @app.post("/branch")
 async def branch(req: BranchRequest, request: Request):
     if req.beam_width < 1:
         raise HTTPException(400, "beam_width must be >= 1")
 
     async def on_branch_ready(b: Branch) -> None:
+        _capture_source_hash(orch().tree.get_node(b.node_id))
         await _broadcast("branch.ready", {"branch": branch_to_dict(b)})
 
     try:
         branches = await _run_cancelable(
-            orch().branch(req.node_id, req.prompt, req.beam_width, on_branch_ready=on_branch_ready),
+            orch().branch(
+                req.node_id, req.prompt, req.beam_width,
+                on_branch_ready=on_branch_ready,
+                target_file=req.target_file,
+                target_range=req.target_range.model_dump() if req.target_range else None,
+                include_codebase=req.include_codebase,
+            ),
             request,
         )
     except KeyError as e:
@@ -176,7 +289,13 @@ async def branch(req: BranchRequest, request: Request):
 async def continue_from(req: ContinueRequest, request: Request):
     try:
         node = await _run_cancelable(
-            orch().continue_from(req.node_id, req.prompt), request
+            orch().continue_from(
+                req.node_id, req.prompt,
+                target_file=req.target_file,
+                target_range=req.target_range.model_dump() if req.target_range else None,
+                include_codebase=req.include_codebase,
+            ),
+            request,
         )
     except KeyError as e:
         raise HTTPException(404, str(e))
@@ -184,6 +303,7 @@ async def continue_from(req: ContinueRequest, request: Request):
         raise HTTPException(502, str(e))
     except asyncio.CancelledError:
         raise HTTPException(499, "Request cancelled by client")
+    _capture_source_hash(node)
     return {"node": node_to_dict(node)}
 
 
@@ -248,6 +368,79 @@ async def session_load(req: LoadRequest):
         asyncio.create_task(_rescore_and_notify(to_rescore))
 
     return {"nodes": [node_to_dict(n) for n in tree.all_nodes()]}
+
+
+@app.post("/workspace")
+async def set_workspace(req: WorkspaceRequest):
+    """Step 3.2: the VS Code extension calls this once on activation to
+    declare its workspace root. /apply-to-file refuses any write outside it.
+
+    Step 3.6/3.7 (2026-09-27): also (re-)gathers a codebase snapshot and
+    stores it on the root node — this doubles as the "refresh codebase
+    context" action from Step 3.7: calling /workspace again (even with the
+    same root) re-walks the directory and updates what future nodes
+    inherit. It never touches already-created nodes — append-only holds.
+    """
+    global _workspace_root
+    root = Path(req.root).expanduser().resolve()
+    if not root.is_dir():
+        raise HTTPException(400, f"Not a directory: {root}")
+    _workspace_root = root
+
+    # Filesystem walk is blocking; keep it off the event loop.
+    snapshot = await asyncio.to_thread(gather_codebase_context, root)
+    orch().tree.set_codebase_context("root", snapshot or None)
+
+    return {"root": str(_workspace_root), "codebase_context_chars": len(snapshot)}
+
+
+@app.post("/apply-to-file")
+def apply_to_file(req: ApplyToFileRequest):
+    """Step 3.2: writes a node's code_snapshot to its target_file.
+
+    Full-file replace — real conflict detection (diffing, merging) is
+    Phase 5's job, once git_engine.py exists. Step 3.9 (2026-09-27) adds
+    a minimal interim safeguard in the meantime: refuses if the file's
+    content has changed since this node was created, rather than blindly
+    overwriting real content with a stale or contextless result (see
+    ROADMAP.md's Phase 3 incident log for what happens without this).
+    """
+    try:
+        node = orch().tree.get_node(req.node_id)
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+
+    if not node.target_file:
+        raise HTTPException(400, f"Node {req.node_id} has no target_file set")
+
+    target = _resolve_target_path(node.target_file)
+
+    if req.node_id in _source_hashes:
+        expected = _source_hashes[req.node_id]
+        current = _hash_file(target)
+        if expected != current:
+            raise HTTPException(
+                409,
+                f"{target} has changed since this branch was generated — "
+                "refusing to overwrite it blindly. Re-generate from the "
+                "current file, or apply manually.",
+            )
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if node.target_range:
+            try:
+                original = target.read_text()
+            except OSError:
+                original = ""
+            target.write_text(_splice_range(original, node.target_range, node.code_snapshot))
+        else:
+            target.write_text(node.code_snapshot)
+    except OSError as e:
+        raise HTTPException(500, f"Could not write {target}: {e}")
+
+    _source_hashes[req.node_id] = _hash_file(target)
+    return {"path": str(target)}
 
 
 @app.websocket("/ws")

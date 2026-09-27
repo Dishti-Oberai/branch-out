@@ -9,6 +9,11 @@ const DEFAULT_SESSION_PATH = "sessions/session.json";
 export default function App() {
   const tree = useTree();
   const [prompt, setPrompt] = useState("");
+  // Step 3.5: applying to a file happens inside the VS Code webview, where
+  // window.alert()/confirm() are exactly the kind of native dialog that's
+  // already been unreliable elsewhere in this app (see the Explore-
+  // alternatives fix) — a transient inline message instead.
+  const [applyStatus, setApplyStatus] = useState<string | null>(null);
   const { branch } = tree;
 
   // Orphaned nodes revive on click (backtrack there); everything else just opens the inspector.
@@ -57,12 +62,23 @@ export default function App() {
         </div>
         {tree.selected && (
           <NodeInspector
+            key={tree.selected.id}
             node={tree.selected}
+            nodes={tree.nodes}
             isActive={tree.selected.id === tree.active?.id}
             pending={tree.pendingScoreIds.has(tree.selected.id)}
             onMakeActive={() => tree.backtrack(tree.selected!.id)}
             onClose={() => tree.select(null)}
             onEditPrompt={(newPrompt) => tree.editPrompt(tree.selected!.id, newPrompt)}
+            onApplyToFile={async () => {
+              setApplyStatus(null);
+              try {
+                const { path } = await tree.applyToFile(tree.selected!.id);
+                setApplyStatus(`Applied to ${path}`);
+              } catch (e) {
+                setApplyStatus(`Apply failed: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }}
           />
         )}
       </div>
@@ -104,6 +120,7 @@ export default function App() {
           Load
         </button>
         {tree.error && <span className="error">{tree.error}</span>}
+        {applyStatus && <span className="apply-status">{applyStatus}</span>}
       </form>
     </div>
   );

@@ -12,6 +12,8 @@ from tests.conftest import FakeLLM
 @pytest.fixture
 def client():
     main._orchestrator = Orchestrator(FakeLLM())
+    main._workspace_root = None
+    main._source_hashes.clear()
     return TestClient(main.app)
 
 
@@ -220,3 +222,223 @@ def test_session_load_does_not_touch_nodes_already_test_scored_or_without_tests(
     assert nodes["a"]["score_source"] == "tests"
     assert nodes["b"]["score"] == 0.9
     assert nodes["b"]["score_source"] == "llm_judge"
+
+
+# ---- Phase 3: VS Code extension (schema + apply-to-file) ------------------
+
+def test_branch_accepts_target_file_and_range(client):
+    r = client.post("/branch", json={
+        "node_id": "root", "prompt": "hi", "beam_width": 1,
+        "target_file": "src/foo.py",
+        "target_range": {"start_line": 1, "end_line": 5},
+    })
+    assert r.status_code == 200
+    node = client.get("/session").json()["nodes"][1]
+    assert node["target_file"] == "src/foo.py"
+    assert node["target_range"] == {"start_line": 1, "end_line": 5}
+
+
+def test_continue_accepts_target_file_and_range(client):
+    r = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi",
+        "target_file": "src/bar.py",
+        "target_range": {"start_line": 2, "end_line": 4},
+    })
+    assert r.status_code == 200
+    assert r.json()["node"]["target_file"] == "src/bar.py"
+
+
+def test_branch_without_target_file_leaves_it_null(client):
+    r = client.post("/branch", json={"node_id": "root", "prompt": "hi", "beam_width": 1})
+    node = client.get("/session").json()["nodes"][1]
+    assert node["target_file"] is None
+    assert node["target_range"] is None
+
+
+def test_set_workspace_rejects_non_directory(client, tmp_path):
+    not_a_dir = tmp_path / "nope.txt"
+    not_a_dir.write_text("x")
+    r = client.post("/workspace", json={"root": str(not_a_dir)})
+    assert r.status_code == 400
+
+
+def test_apply_to_file_writes_code_snapshot(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "src/out.py",
+    }).json()["node"]
+
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 200
+    written = tmp_path / "src" / "out.py"
+    assert written.read_text() == node["code_snapshot"]
+    assert r.json()["path"] == str(written)
+
+
+def test_apply_to_file_with_target_range_splices_instead_of_overwriting(client, tmp_path):
+    # Real bug (2026-09-27): a node created from a *selection* only ever
+    # holds that selection's code — applying it as a full-file overwrite
+    # silently destroyed everything else in the file. Fix: splice into just
+    # target_range's lines when one is set.
+    original = "line1\nline2\nline3\nline4\nline5\n"
+    (tmp_path / "out.py").write_text(original)
+    client.post("/workspace", json={"root": str(tmp_path)})
+
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: json.dumps({"code": "REPLACED-2\nREPLACED-3\n", "reasoning": "r"})
+    ))
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+        "target_range": {"start_line": 2, "end_line": 3},
+    }).json()["node"]
+
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 200
+    assert (tmp_path / "out.py").read_text() == "line1\nREPLACED-2\nREPLACED-3\nline4\nline5\n"
+
+
+def test_apply_to_file_without_target_range_still_overwrites_whole_file(client, tmp_path):
+    (tmp_path / "out.py").write_text("old content\n")
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+    }).json()["node"]
+
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 200
+    assert (tmp_path / "out.py").read_text() == node["code_snapshot"]
+
+
+def test_apply_to_file_rejects_node_without_target_file(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={"node_id": "root", "prompt": "hi"}).json()["node"]
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 400
+
+
+def test_apply_to_file_rejects_without_workspace_declared(client, tmp_path):
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+    }).json()["node"]
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 400
+
+
+def test_apply_to_file_rejects_path_traversal_outside_workspace(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "../../etc/passwd",
+    }).json()["node"]
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 400
+
+
+def test_apply_to_file_unknown_node_is_404(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    r = client.post("/apply-to-file", json={"node_id": "nope"})
+    assert r.status_code == 404
+
+
+def test_cors_allows_arbitrary_origins_including_vscode_webview(client):
+    # Regression: CORS used to allowlist only http://localhost:5173 (the
+    # web app's dev-server origin), which silently rejected every request
+    # from a VS Code webview (origin vscode-webview://<random-id>) — found
+    # as a real "Failed to fetch" bug during the VS Code extension's first
+    # real-world test. Any origin must be allowed now.
+    webview_origin = "vscode-webview://abc123"
+    r = client.get("/session", headers={"Origin": webview_origin})
+    assert r.status_code == 200
+    assert r.headers.get("access-control-allow-origin") in ("*", webview_origin)
+
+
+# ---- Phase 1/3 amendment (2026-09-27): codebase-aware context ------------
+
+def test_workspace_gathers_codebase_context_onto_root(client, tmp_path):
+    (tmp_path / "main.py").write_text("print('marker-xyz')\n")
+    r = client.post("/workspace", json={"root": str(tmp_path)})
+    assert r.status_code == 200
+    assert r.json()["codebase_context_chars"] > 0
+
+    root = next(n for n in client.get("/session").json()["nodes"] if n["id"] == "root")
+    assert "marker-xyz" in root["codebase_context"]
+
+
+def test_new_nodes_inherit_codebase_context_from_root(client, tmp_path):
+    (tmp_path / "main.py").write_text("print('marker-xyz')\n")
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={"node_id": "root", "prompt": "hi"}).json()["node"]
+    assert "marker-xyz" in node["codebase_context"]
+
+
+def test_include_codebase_false_leaves_prompt_without_it_but_node_still_inherits(client, tmp_path):
+    (tmp_path / "main.py").write_text("print('marker-xyz')\n")
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "include_codebase": False,
+    }).json()["node"]
+    # still inherited onto the node itself, just excluded from this prompt
+    assert "marker-xyz" in node["codebase_context"]
+
+
+def test_calling_workspace_again_refreshes_codebase_context(client, tmp_path):
+    (tmp_path / "main.py").write_text("print('version-1')\n")
+    client.post("/workspace", json={"root": str(tmp_path)})
+    (tmp_path / "main.py").write_text("print('version-2')\n")
+    client.post("/workspace", json={"root": str(tmp_path)})
+
+    root = next(n for n in client.get("/session").json()["nodes"] if n["id"] == "root")
+    assert "version-2" in root["codebase_context"]
+    assert "version-1" not in root["codebase_context"]
+
+
+# ---- Step 3.9: apply-to-file safety net ----------------------------------
+
+def test_apply_to_file_succeeds_when_file_unchanged_since_generation(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+    }).json()["node"]
+
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 200
+
+
+def test_apply_to_file_refuses_when_file_changed_since_generation(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+    }).json()["node"]
+
+    # the file didn't exist when the node was created (hash captured as
+    # None); someone/something creates it in the meantime
+    (tmp_path / "out.py").write_text("# surprise content\n")
+
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 409
+
+
+def test_apply_to_file_allows_reapplying_after_a_successful_apply(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+    }).json()["node"]
+
+    first = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert first.status_code == 200
+    # re-applying the same node right after its own successful apply must
+    # not spuriously conflict with itself
+    second = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert second.status_code == 200
+
+
+def test_apply_to_file_allows_writes_for_nodes_with_no_hash_history(client, tmp_path):
+    # e.g. a node from a session saved before Step 3.9 existed — fail-open,
+    # not fail-closed, for anything we have no record of.
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+    }).json()["node"]
+    main._source_hashes.pop(node["id"], None)
+
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 200

@@ -1,9 +1,44 @@
 import asyncio
-from typing import Awaitable, Callable, List, Optional, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from branch_generator import branch_label, generate_branches
+from codebase_graph import select_relevant_subset
 from models import DEFAULT_BEAM_WIDTH, Branch, TreeNode
 from tree_state import TreeStateManager
+
+# How many import-graph hops out from `target_file` to include (2026-09-27
+# follow-up to the Phase 1 amendment). 1 = target_file plus files it
+# directly imports or is imported by. Not exposed as an API parameter --
+# not a decision worth a whole request-schema field yet; a fixed, documented
+# constant is enough for a POC and easy to bump later if it proves too
+# narrow in practice.
+_CODEBASE_GRAPH_DEPTH = 1
+
+
+def _codebase_context_for_prompt(
+    codebase_context: Optional[str], target_file: Optional[str], include_codebase: bool
+) -> Optional[str]:
+    """Decides what codebase context (if any) actually goes in the LLM
+    prompt for one call. The *node's own* `codebase_context` (the full
+    snapshot) is untouched by this -- it's still what gets inherited by
+    children regardless of what any single call chose to send.
+
+    - `include_codebase=False` -> None, always (existing behavior).
+    - No `target_file` -> the full snapshot (existing behavior) -- nothing
+      to scope a subgraph around (e.g. a tree-panel question with no file
+      focus).
+    - `target_file` set -> a relevance-scoped subset (target_file plus its
+      import-graph neighbors) instead of the whole codebase. Fails open to
+      the full snapshot if `target_file` isn't found in it (outside the
+      workspace, excluded as binary/oversized, etc.) rather than silently
+      sending nothing.
+    """
+    if not include_codebase:
+        return None
+    if not codebase_context or not target_file:
+        return codebase_context
+    scoped = select_relevant_subset(codebase_context, target_file, depth=_CODEBASE_GRAPH_DEPTH)
+    return scoped if scoped is not None else codebase_context
 
 OnBranchReady = Callable[[Branch], Awaitable[None]]
 
@@ -41,6 +76,9 @@ class Orchestrator:
         prompt: str,
         beam_width: int = DEFAULT_BEAM_WIDTH,
         on_branch_ready: Optional[OnBranchReady] = None,
+        target_file: Optional[str] = None,
+        target_range: Optional[Dict[str, int]] = None,
+        include_codebase: bool = True,
     ) -> List[Branch]:
         """Generate up to `beam_width` children of `node_id`. Never mutates existing code.
 
@@ -49,9 +87,22 @@ class Orchestrator:
         as each of the `beam_width` LLM calls completes, not after all of
         them do. Step 2.4's `branch.ready` WebSocket event is wired through
         this, not through a separate post-hoc loop.
+
+        `target_file`/`target_range` (Phase 3): set on every node this call
+        creates. The web UI never passes these (stays None); the VS Code
+        extension always does.
+
+        `include_codebase` (Phase 3, Step 3.7): every created node always
+        *inherits* `parent.codebase_context` regardless of this flag — it's
+        cheap, local, and future descendants should still have it available
+        even if this particular turn opted out. What the flag controls is
+        narrower: whether that inherited value is actually included in the
+        prompt sent to the LLM for *this* call.
         """
         async with self._lock:
-            return await self._branch_unlocked(node_id, prompt, beam_width, on_branch_ready)
+            return await self._branch_unlocked(
+                node_id, prompt, beam_width, on_branch_ready, target_file, target_range, include_codebase
+            )
 
     async def _branch_unlocked(
         self,
@@ -59,6 +110,9 @@ class Orchestrator:
         prompt: str,
         beam_width: int,
         on_branch_ready: Optional[OnBranchReady] = None,
+        target_file: Optional[str] = None,
+        target_range: Optional[Dict[str, int]] = None,
+        include_codebase: bool = True,
     ) -> List[Branch]:
         parent = self.tree.get_node(node_id)
         offset = len(parent.children_ids)
@@ -79,6 +133,9 @@ class Orchestrator:
                 status="normal",
                 query_history=[],
                 branch_label=f"Branch {branch_label(offset + i)}",
+                target_file=target_file,
+                target_range=target_range,
+                codebase_context=parent.codebase_context,
             )
             self.tree.add_node(node)
             b.node_id = node.id
@@ -89,10 +146,18 @@ class Orchestrator:
         await generate_branches(
             prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width,
             on_result=on_result,
+            codebase_context=_codebase_context_for_prompt(parent.codebase_context, target_file, include_codebase),
         )
         return [b for b in results if b is not None]
 
-    async def continue_from(self, node_id: str, prompt: str) -> TreeNode:
+    async def continue_from(
+        self,
+        node_id: str,
+        prompt: str,
+        target_file: Optional[str] = None,
+        target_range: Optional[Dict[str, int]] = None,
+        include_codebase: bool = True,
+    ) -> TreeNode:
         """Single LLM call, no branching: adds one new child of `node_id` and
         makes it the active node — a reply advances the conversation, the
         way any normal chat does. Without this, asking a second question
@@ -103,13 +168,21 @@ class Orchestrator:
         stays inactive until the user chooses to make it active.
         """
         async with self._lock:
-            node = await self._continue_from_unlocked(node_id, prompt)
+            node = await self._continue_from_unlocked(node_id, prompt, target_file, target_range, include_codebase)
             return self._activate_unlocked(node.id)
 
-    async def _continue_from_unlocked(self, node_id: str, prompt: str) -> TreeNode:
+    async def _continue_from_unlocked(
+        self,
+        node_id: str,
+        prompt: str,
+        target_file: Optional[str] = None,
+        target_range: Optional[Dict[str, int]] = None,
+        include_codebase: bool = True,
+    ) -> TreeNode:
         parent = self.tree.get_node(node_id)
         branches = await generate_branches(
-            prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width=1
+            prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width=1,
+            codebase_context=_codebase_context_for_prompt(parent.codebase_context, target_file, include_codebase),
         )
         if not branches:
             raise LLMGenerationFailed(f"LLM failed to generate a continuation for node {node_id}")
@@ -126,6 +199,9 @@ class Orchestrator:
             status="normal",
             query_history=[],
             branch_label=f"Branch {branch_label(len(parent.children_ids))}",
+            target_file=target_file,
+            target_range=target_range,
+            codebase_context=parent.codebase_context,
         )
         self.tree.add_node(node)
         return self.tree.get_node(node.id)

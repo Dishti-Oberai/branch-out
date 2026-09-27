@@ -30,6 +30,22 @@ class TreeNode:
     query_history: List[QueryEntry]
     branch_label: str  # "Branch A", "Branch B" etc.
     created_at: datetime = field(default_factory=datetime.utcnow)
+    # Phase 3 addition (VS Code extension): which real file/lines this
+    # node's code applies to. Flagged schema addition, same pattern as
+    # Branch.score_source in Phase 2. Nodes created via the web UI leave
+    # these None; nodes created via the extension always set them. Both
+    # have defaults so old session files (saved before this field existed)
+    # still load via node_from_dict without any special-case code.
+    target_file: Optional[str] = None
+    target_range: Optional[Dict[str, int]] = None  # {"start_line": int, "end_line": int}
+    # Phase 1 amendment (2026-09-27): a static codebase snapshot, distinct
+    # from context_summary on purpose — that field is an accumulating
+    # per-turn decision log; this is reference material that doesn't grow
+    # per-turn. Inherited parent->child by Orchestrator (same pattern as
+    # user_preferences), populated by Phase 3's POST /workspace. None for
+    # every node until a workspace is declared. See ROADMAP.md Phase 1's
+    # "Amendment planned 2026-09-27" note for the full rationale.
+    codebase_context: Optional[str] = None
 
 
 @dataclass

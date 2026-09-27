@@ -170,6 +170,16 @@ button:disabled { cursor: not-allowed; }
 }
 .icon-btn:hover { background: var(--panel); color: var(--ink); }
 
+.code-snapshot-heading { display: flex; align-items: baseline; gap: 6px; }
+.code-unchanged-note { font-size: 11px; }
+.code-toggle {
+  width: auto; height: auto;
+  padding: 1px 8px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  margin-left: auto;
+}
+
 .tabs { display: flex; gap: 14px; margin-bottom: 14px; }
 .tab {
   font-family: var(--font-sans);
@@ -361,6 +371,18 @@ button:disabled { cursor: not-allowed; }
   color: var(--rose-text);
   background: var(--rose-wash);
   border: 1px solid var(--rose);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+/* Step 3.5: inline, non-blocking — a native alert() would be exactly the
+   kind of dialog that's unreliable inside the VS Code webview. */
+.apply-status {
+  color: var(--indigo);
+  background: var(--indigo-wash);
+  border: 1px solid var(--indigo);
   padding: 6px 10px;
   border-radius: var(--radius);
   font-family: var(--font-sans);

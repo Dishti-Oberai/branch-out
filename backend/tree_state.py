@@ -108,6 +108,16 @@ class TreeStateManager:
         node.score = score
         node.score_source = score_source
 
+    def set_codebase_context(self, node_id: str, codebase_context: Optional[str]) -> None:
+        """Phase 3 (2026-09-27): updates `codebase_context` only.
+
+        Joins `score`/`score_source` as mutable metadata — set once when a
+        workspace is declared (or re-set on an explicit refresh), never as
+        part of normal append-only node creation. New nodes get their own
+        copy via inheritance in Orchestrator, not through this method.
+        """
+        self._raw(node_id).codebase_context = codebase_context
+
     def mark_stale(self, node_ids: List[str]) -> None:
         for nid in node_ids:
             self._raw(nid).status = "stale"

@@ -18,6 +18,7 @@ async def generate_branches(
     llm_client,
     beam_width: int = DEFAULT_BEAM_WIDTH,
     on_result: Optional[OnResult] = None,
+    codebase_context: Optional[str] = None,
 ) -> List[Branch]:
     """Generate `beam_width` branches in parallel.
 
@@ -26,9 +27,20 @@ async def generate_branches(
     gather completes. Step 2.4 (`branch.ready` firing per branch as it
     completes) depends on this; `continue_from`/`edit_prompt` don't pass it
     and see no behavior change.
+
+    `codebase_context` (Phase 1 amendment, 2026-09-27): a static codebase
+    snapshot, included as its own labeled section when given. The caller
+    (Orchestrator) is responsible for deciding whether to pass it at all —
+    this function doesn't know about `include_codebase`, it just includes
+    whatever it's handed or omits the section entirely when it's None.
+    Tokenetics (claude_client.py) is what's supposed to keep this from
+    being a token-cost problem as it grows; this is the first real exercise
+    of that on something other than ordinary conversational growth.
     """
     tasks = [
-        _generate_and_notify(prompt, context_summary, user_preferences, llm_client, i, beam_width, on_result)
+        _generate_and_notify(
+            prompt, context_summary, user_preferences, llm_client, i, beam_width, on_result, codebase_context
+        )
         for i in range(beam_width)
     ]
     results = await asyncio.gather(*tasks)
@@ -36,10 +48,12 @@ async def generate_branches(
 
 
 async def _generate_and_notify(
-    prompt, context, preferences, client, index, beam_width, on_result: Optional[OnResult]
+    prompt, context, preferences, client, index, beam_width, on_result: Optional[OnResult], codebase_context
 ) -> Optional[Branch]:
     try:
-        branch = await _generate_single_branch(prompt, context, preferences, client, index, beam_width)
+        branch = await _generate_single_branch(
+            prompt, context, preferences, client, index, beam_width, codebase_context
+        )
     except Exception as e:
         # Fail-open: one branch's LLM call failing must never fail the rest.
         logger.error("Branch %d generation failed: %s", index, e)
@@ -52,14 +66,29 @@ async def _generate_and_notify(
 
 
 async def _generate_single_branch(
-    prompt, context, preferences, client, index, beam_width
+    prompt, context, preferences, client, index, beam_width, codebase_context: Optional[str] = None
 ) -> Branch:
+    """Caching fix (2026-09-27): `codebase_context`, when present, now goes
+    into `system` instead of the per-call message — it's the same static
+    text on every call within a session, and Tokenetics' cache-breakpoint
+    stage can only ever anchor a cache_control marker on `system`/`tools`,
+    never on `messages` (confirmed by reading the stage itself; it had no
+    way to cache this before). The per-call-varying "approach N of M"
+    instruction moves the other way, into the message, since it changes
+    every single call anyway and was never a real caching candidate —
+    mixing it into `system` would have made system differ call-to-call,
+    breaking the exact-prefix match caching depends on.
+    """
     prefs = f"\nUser preferences: {', '.join(preferences)}" if preferences else ""
-    system = f"""You are a coding assistant generating approach {index + 1} of {beam_width}.
+    instruction = f"""You are a coding assistant generating approach {index + 1} of {beam_width}.
 Generate a MEANINGFULLY DIFFERENT approach from the others.
 Return only JSON: {{"code": "...", "reasoning": "..."}}"""
+    system = codebase_context if codebase_context else None
     response = await client.complete(
-        messages=[{"role": "user", "content": f"Context: {context}{prefs}\n\nTask: {prompt}"}],
+        messages=[{
+            "role": "user",
+            "content": f"{instruction}\n\nContext: {context}{prefs}\n\nTask: {prompt}",
+        }],
         system=system,
     )
     code, reasoning = _parse(response)

@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -39,3 +40,24 @@ def test_load_malformed_file_raises_value_error(tmp_path):
     bad_file.write_text("{not valid json")
     with pytest.raises(ValueError):
         load_session(str(bad_file))
+
+
+def test_load_pre_phase3_session_file_without_target_file_keys(tmp_path):
+    # A real session.json saved before Phase 3 existed has no
+    # target_file/target_range keys anywhere. Must still load cleanly.
+    old_format = {
+        "nodes": [{
+            "id": "root", "parent_id": None, "children_ids": [],
+            "code_snapshot": "", "context_summary": "", "user_preferences": [],
+            "score": None, "score_source": None, "status": "active",
+            "query_history": [], "branch_label": "Root",
+            "created_at": "2026-01-01T00:00:00",
+        }]
+    }
+    path = tmp_path / "old.json"
+    path.write_text(json.dumps(old_format))
+
+    tree = load_session(str(path))
+    node = tree.get_node("root")
+    assert node.target_file is None
+    assert node.target_range is None

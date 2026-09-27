@@ -71,6 +71,14 @@ def test_set_active_updates_only_status():
     assert tree.get_node("a").code_snapshot == "x"
 
 
+def test_set_codebase_context_updates_only_that_node():
+    tree = TreeStateManager()
+    tree.add_node(make_node("a", "root"))
+    tree.set_codebase_context("root", "--- main.py ---\nprint(1)")
+    assert tree.get_node("root").codebase_context == "--- main.py ---\nprint(1)"
+    assert tree.get_node("a").codebase_context is None
+
+
 def test_mark_stale_marks_only_specified_nodes():
     tree = TreeStateManager()
     tree.add_node(make_node("a", "root"))

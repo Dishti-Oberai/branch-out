@@ -1,0 +1,41 @@
+{
+  "name": "branch-out",
+  "displayName": "Branch-Out",
+  "description": "A coding agent that makes conversations a tree, not a line — branch into approaches, backtrack, and apply the one you want directly to your files.",
+  "version": "0.1.0",
+  "publisher": "branch-out-dev",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:branchout.openTreePanel",
+    "onCommand:branchout.askAboutSelection"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "branchout.openTreePanel",
+        "title": "Branch-Out: Open Tree Panel"
+      },
+      {
+        "command": "branchout.askAboutSelection",
+        "title": "Branch-Out: Ask about selection"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.5"
+  }
+}

@@ -15,6 +15,158 @@ def test_branch_adds_n_nodes_with_correct_parent():
         assert node.parent_id == "root"
 
 
+def test_branch_sets_target_file_and_range_on_every_created_node():
+    o = Orchestrator(FakeLLM())
+    branches = asyncio.run(o.branch(
+        "root", "task", beam_width=3,
+        target_file="/workspace/src/foo.py",
+        target_range={"start_line": 1, "end_line": 5},
+    ))
+    for b in branches:
+        node = o.tree.get_node(b.node_id)
+        assert node.target_file == "/workspace/src/foo.py"
+        assert node.target_range == {"start_line": 1, "end_line": 5}
+
+
+def test_branch_without_target_file_leaves_it_none():
+    o = Orchestrator(FakeLLM())
+    branches = asyncio.run(o.branch("root", "task", beam_width=1))
+    node = o.tree.get_node(branches[0].node_id)
+    assert node.target_file is None
+    assert node.target_range is None
+
+
+def test_continue_from_sets_target_file_and_range():
+    o = Orchestrator(FakeLLM())
+    node = asyncio.run(o.continue_from(
+        "root", "task", target_file="/workspace/src/bar.py", target_range={"start_line": 10, "end_line": 20}
+    ))
+    assert node.target_file == "/workspace/src/bar.py"
+    assert node.target_range == {"start_line": 10, "end_line": 20}
+    assert o.tree.get_node(node.id).target_file == "/workspace/src/bar.py"
+
+
+def test_branch_inherits_parent_codebase_context():
+    o = Orchestrator(FakeLLM())
+    o.tree.set_codebase_context("root", "--- main.py ---\nprint('hi')")
+    branches = asyncio.run(o.branch("root", "task", beam_width=2))
+    for b in branches:
+        assert o.tree.get_node(b.node_id).codebase_context == "--- main.py ---\nprint('hi')"
+
+
+def test_continue_from_inherits_parent_codebase_context():
+    o = Orchestrator(FakeLLM())
+    o.tree.set_codebase_context("root", "--- main.py ---\nprint('hi')")
+    node = asyncio.run(o.continue_from("root", "task"))
+    assert node.codebase_context == "--- main.py ---\nprint('hi')"
+    # and it keeps propagating to grandchildren
+    grandchild = asyncio.run(o.continue_from(node.id, "task 2"))
+    assert grandchild.codebase_context == "--- main.py ---\nprint('hi')"
+
+
+def test_no_codebase_context_set_leaves_it_none_on_children():
+    o = Orchestrator(FakeLLM())
+    node = asyncio.run(o.continue_from("root", "task"))
+    assert node.codebase_context is None
+
+
+def test_include_codebase_true_sends_it_to_the_llm():
+    # Caching fix (2026-09-27): codebase_context now goes into `system`,
+    # not the per-call message -- that's the only field Tokenetics' cache
+    # breakpoint optimizer can ever anchor a cache_control marker on.
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", "--- main.py ---\nSECRET_MARKER")
+    asyncio.run(o.continue_from("root", "task", include_codebase=True))
+    assert llm.received[0]["system"] == "--- main.py ---\nSECRET_MARKER"
+    assert "SECRET_MARKER" not in llm.received[0]["messages"][0]["content"]
+
+
+def test_include_codebase_false_excludes_it_from_the_prompt_but_node_still_inherits():
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", "--- main.py ---\nSECRET_MARKER")
+    node = asyncio.run(o.continue_from("root", "task", include_codebase=False))
+    assert llm.received[0]["system"] is None
+    assert "SECRET_MARKER" not in llm.received[0]["messages"][0]["content"]
+    # the node itself still has it, for a later turn that opts back in
+    assert node.codebase_context == "--- main.py ---\nSECRET_MARKER"
+
+
+def _multi_file_snapshot() -> str:
+    return (
+        "--- main.py ---\nfrom utils import helper\n\n\n"
+        "--- utils.py ---\ndef helper():\n    pass\n\n\n"
+        "--- unrelated.py ---\nSECRET_UNRELATED_MARKER\n\n\n"
+    )
+
+
+def test_continue_from_with_target_file_sends_only_the_relevant_graph_subset():
+    # Graph-based context (2026-09-27): with a target_file set, the prompt
+    # gets target_file + its import neighbors, not the whole codebase --
+    # unrelated.py (no import relationship to main.py) must not appear.
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    sent_system = llm.received[0]["system"]
+    assert "utils.py" in sent_system
+    assert "def helper" in sent_system
+    assert "SECRET_UNRELATED_MARKER" not in sent_system
+
+
+def test_continue_from_without_target_file_still_sends_the_whole_snapshot():
+    # No target_file to anchor a subgraph on -> falls back to the full
+    # snapshot, same as before graph-scoping existed.
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    asyncio.run(o.continue_from("root", "task", include_codebase=True))
+    assert "SECRET_UNRELATED_MARKER" in llm.received[0]["system"]
+
+
+def test_continue_from_with_unknown_target_file_falls_back_to_full_snapshot():
+    # target_file not present in the snapshot at all (e.g. outside the
+    # workspace) -- fail open to the full snapshot rather than sending
+    # nothing.
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    asyncio.run(o.continue_from("root", "task", target_file="nope.py", include_codebase=True))
+    assert "SECRET_UNRELATED_MARKER" in llm.received[0]["system"]
+
+
+def test_branch_with_target_file_scopes_every_parallel_call():
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    asyncio.run(o.branch("root", "task", beam_width=3, target_file="main.py", include_codebase=True))
+    for call in llm.received:
+        assert "SECRET_UNRELATED_MARKER" not in call["system"]
+        assert "utils.py" in call["system"]
+
+
+def test_node_still_inherits_the_full_unscoped_snapshot_even_when_the_prompt_was_scoped():
+    # The graph-scoped subset only affects what one call's prompt sees --
+    # the node's own codebase_context (what children inherit) stays the
+    # full snapshot, same append-only-metadata pattern as include_codebase.
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert "SECRET_UNRELATED_MARKER" in node.codebase_context
+
+
+def test_branch_include_codebase_false_excludes_it_from_all_parallel_calls():
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", "--- main.py ---\nSECRET_MARKER")
+    asyncio.run(o.branch("root", "task", beam_width=3, include_codebase=False))
+    for call in llm.received:
+        assert call["system"] is None
+        assert "SECRET_MARKER" not in call["messages"][0]["content"]
+
+
 def test_on_branch_ready_fires_per_branch_with_node_id_already_set():
     o = Orchestrator(FakeLLM())
     ready = []
