@@ -201,3 +201,40 @@ def select_relevant_subset(snapshot: str, target_file: str, depth: int = 1) -> O
             break
 
     return "".join(f"--- {path} ---\n{chunks[path]}\n\n" for path in sorted(selected))
+
+
+# How many import-graph hops out from a target_file to include. 1 = the
+# file plus files it directly imports or is imported by. Not exposed as an
+# API parameter -- not a decision worth a whole request-schema field yet; a
+# fixed, documented constant is enough for a POC and easy to bump later if
+# it proves too narrow in practice.
+CODEBASE_GRAPH_DEPTH = 1
+
+
+def codebase_context_for_prompt(
+    codebase_context: Optional[str], target_file: Optional[str], include_codebase: bool
+) -> Optional[str]:
+    """Decides what codebase context (if any) actually goes in one LLM
+    call's prompt. Shared by `orchestrator.py` (branch/continue) and
+    `context_retriever.py` (Phase 4 queries) -- originally lived only in
+    orchestrator.py, promoted here 2026-09-27 so both call sites share one
+    implementation instead of two copies drifting apart.
+
+    Deliberately does NOT touch a node's own *stored* `codebase_context` --
+    callers are responsible for keeping that as the full snapshot regardless
+    of what any single call chose to send.
+
+    - `include_codebase=False` -> None, always.
+    - No `target_file` -> the full snapshot -- nothing to scope a subgraph
+      around (e.g. a tree-panel question with no file focus).
+    - `target_file` set -> a relevance-scoped subset (target_file plus its
+      import-graph neighbors). Fails open to the full snapshot if
+      `target_file` isn't found in it (outside the workspace, excluded as
+      binary/oversized, etc.) rather than silently sending nothing.
+    """
+    if not include_codebase:
+        return None
+    if not codebase_context or not target_file:
+        return codebase_context
+    scoped = select_relevant_subset(codebase_context, target_file, depth=CODEBASE_GRAPH_DEPTH)
+    return scoped if scoped is not None else codebase_context

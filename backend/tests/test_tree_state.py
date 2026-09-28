@@ -79,6 +79,31 @@ def test_set_codebase_context_updates_only_that_node():
     assert tree.get_node("a").codebase_context is None
 
 
+def test_add_query_entry_appends_only_to_that_node():
+    from datetime import datetime
+    from models import QueryEntry
+
+    tree = TreeStateManager()
+    tree.add_node(make_node("a", "root"))
+    entry = QueryEntry(id="q1", question="what?", answer="this.", timestamp=datetime.utcnow())
+    tree.add_query_entry("a", entry)
+    assert tree.get_node("a").query_history == [entry]
+    assert tree.get_node("root").query_history == []
+
+
+def test_add_query_entry_accumulates_multiple_entries_in_order():
+    from datetime import datetime
+    from models import QueryEntry
+
+    tree = TreeStateManager()
+    tree.add_node(make_node("a", "root"))
+    e1 = QueryEntry(id="q1", question="first?", answer="a1", timestamp=datetime.utcnow())
+    e2 = QueryEntry(id="q2", question="second?", answer="a2", timestamp=datetime.utcnow(), chained_from="q1")
+    tree.add_query_entry("a", e1)
+    tree.add_query_entry("a", e2)
+    assert [q.id for q in tree.get_node("a").query_history] == ["q1", "q2"]
+
+
 def test_mark_stale_marks_only_specified_nodes():
     tree = TreeStateManager()
     tree.add_node(make_node("a", "root"))

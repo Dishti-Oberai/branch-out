@@ -392,3 +392,69 @@ def test_lock_is_released_after_a_cancelled_call():
 
     branches = asyncio.run(run())
     assert len(branches) == 1
+
+
+# ---- Phase 4: cross-node querying (orchestrator.query) --------------------
+
+def test_query_returns_a_query_entry_with_the_answer():
+    llm = FakeLLM(response_fn=lambda i: "the answer")
+    o = Orchestrator(llm)
+    entry = asyncio.run(o.query("root", "what is this?"))
+    assert entry.question == "what is this?"
+    assert entry.answer == "the answer"
+    assert entry.chained_from is None
+
+
+def test_query_appends_to_the_queried_nodes_query_history():
+    llm = FakeLLM(response_fn=lambda i: "the answer")
+    o = Orchestrator(llm)
+    entry = asyncio.run(o.query("root", "what is this?"))
+    assert o.tree.get_node("root").query_history == [entry]
+
+
+def test_query_never_touches_the_active_node():
+    llm = FakeLLM()
+    o = Orchestrator(llm)
+    branches = asyncio.run(o.branch("root", "task", beam_width=1))
+    active_before = o.tree.active_id
+    asyncio.run(o.query("root", "what happened here?"))  # queries root, not the active node
+    assert o.tree.active_id == active_before
+    assert o.tree.get_node(active_before).status == "active"
+
+
+def test_query_unknown_node_raises_key_error():
+    o = Orchestrator(FakeLLM())
+    with pytest.raises(KeyError):
+        asyncio.run(o.query("nope", "what is this?"))
+
+
+def test_query_llm_failure_leaves_history_unchanged():
+    o = Orchestrator(FakeLLM(fail_on={0}))
+    with pytest.raises(LLMGenerationFailed):
+        asyncio.run(o.query("root", "what is this?"))
+    assert o.tree.get_node("root").query_history == []
+
+
+def test_chained_query_includes_the_prior_qa_in_the_prompt():
+    llm = FakeLLM(response_fn=lambda i: f"answer {i}")
+    o = Orchestrator(llm)
+    first = asyncio.run(o.query("root", "first question"))
+    asyncio.run(o.query("root", "follow-up question", chain_from=first.id))
+    second_call_content = llm.received[1]["messages"][0]["content"]
+    assert "first question" in second_call_content
+    assert "answer 0" in second_call_content  # the prior answer, verbatim
+
+
+def test_chained_query_unknown_chain_from_raises_key_error():
+    o = Orchestrator(FakeLLM())
+    with pytest.raises(KeyError):
+        asyncio.run(o.query("root", "follow-up", chain_from="not-a-real-entry-id"))
+
+
+def test_two_queries_on_the_same_node_both_recorded_in_order():
+    llm = FakeLLM(response_fn=lambda i: f"answer {i}")
+    o = Orchestrator(llm)
+    e1 = asyncio.run(o.query("root", "q1"))
+    e2 = asyncio.run(o.query("root", "q2"))
+    ids = [q.id for q in o.tree.get_node("root").query_history]
+    assert ids == [e1.id, e2.id]

@@ -1,44 +1,12 @@
 import asyncio
+from datetime import datetime
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from branch_generator import branch_label, generate_branches
-from codebase_graph import select_relevant_subset
-from models import DEFAULT_BEAM_WIDTH, Branch, TreeNode
+from codebase_graph import codebase_context_for_prompt
+from context_retriever import get_relevant_context
+from models import DEFAULT_BEAM_WIDTH, Branch, QueryEntry, TreeNode
 from tree_state import TreeStateManager
-
-# How many import-graph hops out from `target_file` to include (2026-09-27
-# follow-up to the Phase 1 amendment). 1 = target_file plus files it
-# directly imports or is imported by. Not exposed as an API parameter --
-# not a decision worth a whole request-schema field yet; a fixed, documented
-# constant is enough for a POC and easy to bump later if it proves too
-# narrow in practice.
-_CODEBASE_GRAPH_DEPTH = 1
-
-
-def _codebase_context_for_prompt(
-    codebase_context: Optional[str], target_file: Optional[str], include_codebase: bool
-) -> Optional[str]:
-    """Decides what codebase context (if any) actually goes in the LLM
-    prompt for one call. The *node's own* `codebase_context` (the full
-    snapshot) is untouched by this -- it's still what gets inherited by
-    children regardless of what any single call chose to send.
-
-    - `include_codebase=False` -> None, always (existing behavior).
-    - No `target_file` -> the full snapshot (existing behavior) -- nothing
-      to scope a subgraph around (e.g. a tree-panel question with no file
-      focus).
-    - `target_file` set -> a relevance-scoped subset (target_file plus its
-      import-graph neighbors) instead of the whole codebase. Fails open to
-      the full snapshot if `target_file` isn't found in it (outside the
-      workspace, excluded as binary/oversized, etc.) rather than silently
-      sending nothing.
-    """
-    if not include_codebase:
-        return None
-    if not codebase_context or not target_file:
-        return codebase_context
-    scoped = select_relevant_subset(codebase_context, target_file, depth=_CODEBASE_GRAPH_DEPTH)
-    return scoped if scoped is not None else codebase_context
 
 OnBranchReady = Callable[[Branch], Awaitable[None]]
 
@@ -146,7 +114,7 @@ class Orchestrator:
         await generate_branches(
             prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width,
             on_result=on_result,
-            codebase_context=_codebase_context_for_prompt(parent.codebase_context, target_file, include_codebase),
+            codebase_context=codebase_context_for_prompt(parent.codebase_context, target_file, include_codebase),
         )
         return [b for b in results if b is not None]
 
@@ -182,7 +150,7 @@ class Orchestrator:
         parent = self.tree.get_node(node_id)
         branches = await generate_branches(
             prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width=1,
-            codebase_context=_codebase_context_for_prompt(parent.codebase_context, target_file, include_codebase),
+            codebase_context=codebase_context_for_prompt(parent.codebase_context, target_file, include_codebase),
         )
         if not branches:
             raise LLMGenerationFailed(f"LLM failed to generate a continuation for node {node_id}")
@@ -226,6 +194,57 @@ class Orchestrator:
             stale_ids = [node_id] + [d.id for d in self.tree.get_descendants(node_id)]
             self.tree.mark_stale(stale_ids)
             return new_node, stale_ids
+
+    async def query(
+        self, node_id: str, question: str, chain_from: Optional[str] = None
+    ) -> QueryEntry:
+        """Phase 4: ask `node_id` a question without touching the active
+        node — the core value of a tree over a linear chat, querying a
+        past decision doesn't require backtracking to it. Appends a
+        `QueryEntry` to `node_id`'s own `query_history`; creates no new
+        `TreeNode`, moves nothing.
+
+        `chain_from`, if given, is the id of a prior `QueryEntry` on this
+        SAME node — its question/answer is prepended so a follow-up is
+        answered with that exchange already in view.
+        """
+        async with self._lock:
+            return await self._query_unlocked(node_id, question, chain_from)
+
+    async def _query_unlocked(
+        self, node_id: str, question: str, chain_from: Optional[str] = None
+    ) -> QueryEntry:
+        node = self.tree.get_node(node_id)  # raises KeyError -> 404 at the API layer
+
+        prior: Optional[QueryEntry] = None
+        if chain_from is not None:
+            prior = next((q for q in node.query_history if q.id == chain_from), None)
+            if prior is None:
+                raise KeyError(f"Unknown query entry: {chain_from}")
+
+        context = get_relevant_context(self.tree, node_id)
+        chained = f"Prior question: {prior.question}\nPrior answer: {prior.answer}\n\n" if prior else ""
+
+        try:
+            answer = await self.llm.complete(
+                messages=[{"role": "user", "content": f"{chained}Question: {question}"}],
+                system=context,
+            )
+        except Exception as e:
+            # Fail-open (CLAUDE.md): the LLM call failing must never leave
+            # a partial write -- no QueryEntry is appended, history is
+            # exactly what it was before this call.
+            raise LLMGenerationFailed(f"LLM failed to answer the query for node {node_id}: {e}")
+
+        entry = QueryEntry(
+            id=self.tree.new_id(),
+            question=question,
+            answer=answer,
+            timestamp=datetime.utcnow(),
+            chained_from=chain_from,
+        )
+        self.tree.add_query_entry(node_id, entry)
+        return entry
 
     async def backtrack(self, node_id: str) -> TreeNode:
         """Move the active cursor to any node.

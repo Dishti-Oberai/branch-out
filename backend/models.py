@@ -90,3 +90,14 @@ def node_from_dict(d: Dict[str, Any]) -> TreeNode:
 
 def branch_to_dict(branch: Branch) -> Dict[str, Any]:
     return asdict(branch)
+
+
+def query_entry_to_dict(entry: QueryEntry) -> Dict[str, Any]:
+    """Phase 4: serializes one QueryEntry for the /query response — the
+    same `_iso()` timestamp handling `node_to_dict` already applies inline
+    to each entry inside a node's own `query_history`, reused here for a
+    standalone entry (the /query endpoint returns just the new entry, not
+    the whole node — the active node is deliberately untouched by a query)."""
+    d = asdict(entry)
+    _iso(d, "timestamp")
+    return d

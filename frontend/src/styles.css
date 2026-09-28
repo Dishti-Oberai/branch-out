@@ -189,8 +189,38 @@ button:disabled { cursor: not-allowed; }
   color: var(--ink-faint);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
 }
+.tab:hover { color: var(--ink-dim); }
 .tab.on { color: var(--ink); border-bottom: 2px solid var(--indigo); }
+
+/* Phase 4: Queries tab */
+.queries-tab { display: flex; flex-direction: column; gap: 12px; }
+.query-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.query-entry {
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--paper-2);
+}
+.query-question {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 12.5px;
+  margin: 0 0 6px;
+}
+.query-answer {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  white-space: pre-wrap;
+  margin: 0;
+}
+.query-form { display: flex; flex-direction: column; gap: 8px; }
+.query-form textarea { min-height: 64px; }
+.query-form button { align-self: flex-end; }
+.query-error { color: var(--rose-text); font-size: 11.5px; }
 
 .inspector h4 {
   margin: 16px 0 6px;

@@ -299,29 +299,42 @@ This escalated into a scope discussion the user resolved directly (2026-09-27): 
 
 ---
 
-## Phase 4 — Cross-node querying  (renumbered from Phase 3 on 2026-09-26; design amended 2026-09-27, not yet built)
+## Phase 4 — Cross-node querying  (renumbered from Phase 3 on 2026-09-26; design amended 2026-09-27; implemented and verified 2026-09-27)
 
-**Design amendment (2026-09-27), decided before this phase starts:** `get_relevant_context` was scoped to `decisions`/`code_diff`/`summary`/`preferences` — conversational history only, the same gap that caused Phase 3's codebase-context work. A query answered about a node without its `codebase_context` inherits the same "no real code context" failure mode that overwrote the user's README, just via a different code path (a query instead of a continue). `get_relevant_context` must include the queried node's inherited `codebase_context` alongside its conversational history, not just the ancestor decision log.
+**Design amendment (2026-09-27), decided before this phase started:** `get_relevant_context` was scoped to `decisions`/`code_diff`/`summary`/`preferences` — conversational history only, the same gap that caused Phase 3's codebase-context work. A query answered about a node without its `codebase_context` inherits the same "no real code context" failure mode that overwrote the user's README, just via a different code path (a query instead of a continue). `get_relevant_context` must include the queried node's inherited `codebase_context` alongside its conversational history, not just the ancestor decision log.
 
-**4.1 Context retriever** (`context_retriever.py`)
-- [ ] networkx `DiGraph`; nodes store `decisions`, `code_diff`, `summary`, `preferences`, and `codebase_context` (2026-09-27 addition — see above)
-- [ ] `get_relevant_context(node_id)` walks ancestors only; falls back to `context_summary` on failure or empty subgraph; includes the node's `codebase_context` in the composed result
-- [ ] Populate the graph whenever a `TreeNode` is created; serialise with the session
-- [ ] Tests: 3-node chain, forced failure fallback, sibling branches isolated
-- [ ] Test with 10+ node sessions (risk register)
-- [ ] Test: a query answered about a node with real `codebase_context` set actually reflects that content in its answer (mock assertion on what reaches the LLM call)
+**Explicit reuse instruction (2026-09-27):** before starting, the user asked to reuse whatever already existed and keep the codebase clean rather than rebuild things Phase 3 already solved. Concretely reused, not reimplemented:
+- `TreeStateManager.get_ancestors()` (already root-first) drives the graph walk's ordering — no second, independently-derived ordering scheme.
+- The exact same `target_file`-scoped codebase-context selection Phase 3 built for `/branch`/`/continue` — `codebase_context_for_prompt()` was promoted out of `orchestrator.py` into `codebase_graph.py` (a public function, not a private one two modules would otherwise each redefine) so `context_retriever.py` calls the identical logic instead of a second copy that could drift.
+- `QueryEntry`/`TreeNode.query_history` (already in `models.py` since Phase 1, unused until now) and `node_to_dict`'s existing timestamp handling.
+- The append-only-metadata mutator pattern already established by `set_score`/`set_codebase_context` — `query_history` joins them as another explicitly-sanctioned mutable field, not a new kind of exception.
 
-**4.2 `POST /query`**
-- [ ] Reconstruct context, prepend chained prior Q&A if `chain_from`, call LLM, append `QueryEntry`
-- [ ] Active node untouched; 404 for unknown node; LLM failure returns 500 with history unchanged
-- [ ] Tests for each
+**4.1 Context retriever** (`backend/context_retriever.py`) — implemented
+- [x] Real networkx `DiGraph` — CLAUDE.md's non-negotiable constraint ("the networkx subgraph walk is the only permitted reconstruction path") is honored literally, not just in spirit: `build_context_graph()` builds one node per `TreeNode` with `decisions`/`code_diff`/`summary`/`preferences`/`codebase_context`/`target_file` attributes, edges parent→child. `code_diff` is a real `difflib.unified_diff` against the parent's `code_snapshot` (stdlib, no need for Phase 5's `git_engine.py` just for this).
+- [x] `get_relevant_context(tree, node_id)` walks ancestors via `nx.ancestors()` (CLAUDE.md's literal example), composes root-first using `tree.get_ancestors()`'s existing ordering, includes the queried node's own relevance-scoped `codebase_context` (reusing Phase 3's selector — see above). Falls back to the node's own `context_summary` on any failure or an empty subgraph.
+- [x] The graph is rebuilt fresh from the tree on every call rather than separately persisted — a deliberate deviation from the roadmap's original "populate whenever a TreeNode is created; serialise with the session" wording, flagged here rather than silently dropped: the graph is fully derivable from `TreeStateManager`'s own already-persisted node list, so a second, separately-maintained copy of the same structure would risk drifting from the real one and adds nothing session-persistence-wise (CLAUDE.md's own "session persistence is on session end only" principle argues against a second incrementally-updated structure anyway).
+- [x] Tests (`tests/test_context_retriever.py`, 11): one-node-per-TreeNode + edges, a real diff computed correctly, root has no diff (no parent), 3-node chain composed root-first, sibling branches isolated from each other, unknown node raises cleanly, **empty-subgraph fallback** (see real bug below), a node's own `codebase_context` included, `target_file`-scoped codebase context reused correctly, `query_history` itself never leaks into composed context (would be a scope-leak, not what CLAUDE.md's spec asks for), a 10+ node session (risk register item) handled without error.
+- **Real bug caught by its own test:** the first draft always emitted a `"Decisions: []\nSummary: "` label even for a node with nothing real to say (root, typically) — that's non-empty *text*, so the "empty subgraph → fall back to context_summary" path (CLAUDE.md's own conservative-by-default rule) was unreachable for exactly the case it exists to catch. Fixed: a node's contribution is skipped entirely unless it has real decisions, summary, or diff content, not just the label wrapper.
 
-**4.3 Frontend wiring**
-- [ ] Node click opens the Queries tab by default
-- [ ] Textarea submits to `/query` with loading state; history persists across open/close
-- [ ] Follow-ups auto-send `chain_from`
+**4.2 `POST /query`** — implemented
+- [x] `Orchestrator.query(node_id, question, chain_from=None)` — reconstructs context via 4.1, prepends the prior `QueryEntry`'s question/answer verbatim when `chain_from` is given (404 if that id isn't actually on the node), calls the LLM directly for a plain-text answer (no code/reasoning JSON schema — `branch_generator.py` is deliberately NOT reused here, since a query isn't generating a branch), appends a `QueryEntry` via the new `TreeStateManager.add_query_entry()`. Routed through the same `asyncio.Lock` as every other tree-mutating call.
+- [x] Active node untouched (verified — see below); 404 for an unknown `node_id`; on an LLM failure, no `QueryEntry` is appended at all (fail-open, no partial write) and the endpoint returns **502**, not the roadmap text's originally-guessed 500 — deliberately matching the existing `LLMGenerationFailed` convention `/continue`/`/edit-prompt` already use, rather than introducing a third, inconsistent status code for the same failure class.
+- [x] Tests: `tests/test_orchestrator.py` (8 — entry returned correctly, appended to the right node, active node provably untouched, unknown node/chain_from raise `KeyError`, LLM failure leaves history exactly as it was, chained follow-up's prompt actually contains the prior Q&A verbatim, two queries on one node recorded in order); `tests/test_api.py` (7 — full HTTP round-trip for each of the above plus a `/session`-based active-node check).
 
-**Milestone:** query node 2 while on node 5; follow-up references the first; history persists; status bar unchanged.
+**4.3 Frontend wiring** — implemented
+- [x] `NodeInspector` gained a real Queries/State tab switcher (previously a single static "State" label — the component's own comment said "Queries tab arrives in Phase 4"). Selecting a node opens the Queries tab by default: the parent (`App.tsx`) already remounts the inspector per node via `key={node.id}` (from the earlier code-snapshot-collapse fix), so a fresh `useState("queries")` on every selection gives "opens by default" for free without extra plumbing.
+- [x] A textarea + Ask button submits to `/query` with a local loading state — deliberately **not** routed through `useTree`'s global `run()`/`busy` flag, the same reasoning `applyToFile` already established: `busy` disables the main prompt bar app-wide, and a query on a past node must never block working on the active one, which is the entire point of Phase 4.
+- [x] `useTree.query()` patches just the queried node's `query_history` into local state directly from the response, rather than a full `/session` refetch — cheaper and avoids clobbering other in-flight local state.
+- [x] Follow-ups auto-chain: the most recent entry in `node.query_history` is automatically used as `chain_from` for the next submission on that node — no separate UI toggle, matching how a real follow-up naturally builds on the last answer.
+- [x] `frontend`'s `tsc && vite build` builds clean.
+
+**Real-API verification (2026-09-27), 4 calls.** Built a real 2-node chain: node A (`square()` with a docstring), then continued to node B (added type hints) — B became active. Queried node A (not B) twice:
+1. *"What docstring convention did we agree to use?"* — model correctly pointed out no negotiation actually happened (an honest answer to a presupposing question, not a bug).
+2. A better-phrased, **chained** follow-up (`chain_from` the first entry) asking to directly show node A's function and docstring — model reproduced node A's exact original code and docstring **verbatim**, distinct from node B's current (type-hinted, shorter-docstring) version. Real, measured proof the context composition reached the prompt and correctly isolated to the queried node, not the active one.
+
+Confirmed via `/session` after both calls: active node was still B throughout; node A's `query_history` had exactly 2 entries; node B's had 0. This is the Phase 4 milestone, verified end to end on real output: **query a past node while on another, get a coherent answer grounded in the queried node's real content, current node completely untouched.**
+
+145 backend tests before this phase → **173 passing** after (28 new: 2 tree_state, 11 context_retriever, 8 orchestrator, 7 api).
 
 ---
 

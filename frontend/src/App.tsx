@@ -70,6 +70,7 @@ export default function App() {
             onMakeActive={() => tree.backtrack(tree.selected!.id)}
             onClose={() => tree.select(null)}
             onEditPrompt={(newPrompt) => tree.editPrompt(tree.selected!.id, newPrompt)}
+            onQuery={(nodeId, question, chainFrom) => tree.query(nodeId, question, chainFrom)}
             onApplyToFile={async () => {
               setApplyStatus(null);
               try {

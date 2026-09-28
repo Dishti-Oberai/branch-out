@@ -14,7 +14,14 @@ load_dotenv()
 from claude_client import ClaudeClient  # noqa: E402
 from codebase_context import gather_codebase_context  # noqa: E402
 from evaluator import evaluate_branches, rescore_with_tests  # noqa: E402
-from models import DEFAULT_BEAM_WIDTH, Branch, TreeNode, branch_to_dict, node_to_dict  # noqa: E402
+from models import (  # noqa: E402
+    DEFAULT_BEAM_WIDTH,
+    Branch,
+    TreeNode,
+    branch_to_dict,
+    node_to_dict,
+    query_entry_to_dict,
+)
 from orchestrator import LLMGenerationFailed, Orchestrator  # noqa: E402
 from session import load_session, save_session  # noqa: E402
 from test_runner import has_test_imports  # noqa: E402
@@ -226,6 +233,12 @@ class BacktrackRequest(BaseModel):
     node_id: str
 
 
+class QueryRequest(BaseModel):
+    node_id: str
+    question: str
+    chain_from: Optional[str] = None
+
+
 class ContinueRequest(BaseModel):
     node_id: str
     prompt: str
@@ -331,6 +344,27 @@ async def backtrack(req: BacktrackRequest):
     except KeyError as e:
         raise HTTPException(404, str(e))
     return {"node": node_to_dict(node)}
+
+
+@app.post("/query")
+async def query(req: QueryRequest, request: Request):
+    """Phase 4: ask any past node a question without moving off the
+    active node. 404 for an unknown node_id or an unknown chain_from (a
+    QueryEntry id that isn't actually on that node); LLM failure returns
+    502 with the node's query_history left exactly as it was — no partial
+    write, same fail-open contract as /continue.
+    """
+    try:
+        entry = await _run_cancelable(
+            orch().query(req.node_id, req.question, chain_from=req.chain_from), request,
+        )
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except LLMGenerationFailed as e:
+        raise HTTPException(502, str(e))
+    except asyncio.CancelledError:
+        raise HTTPException(499, "Request cancelled by client")
+    return {"query": query_entry_to_dict(entry)}
 
 
 @app.get("/session")

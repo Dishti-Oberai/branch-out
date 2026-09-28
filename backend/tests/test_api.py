@@ -442,3 +442,66 @@ def test_apply_to_file_allows_writes_for_nodes_with_no_hash_history(client, tmp_
 
     r = client.post("/apply-to-file", json={"node_id": node["id"]})
     assert r.status_code == 200
+
+
+# ---- Phase 4: cross-node querying -----------------------------------------
+
+def test_query_returns_the_new_entry(client):
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=lambda i: "the answer"))
+    r = client.post("/query", json={"node_id": "root", "question": "what is this?"})
+    assert r.status_code == 200
+    entry = r.json()["query"]
+    assert entry["question"] == "what is this?"
+    assert entry["answer"] == "the answer"
+    assert entry["chained_from"] is None
+    assert "id" in entry and "timestamp" in entry
+
+
+def test_query_appears_in_the_nodes_query_history_via_session(client):
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=lambda i: "the answer"))
+    client.post("/query", json={"node_id": "root", "question": "what is this?"})
+    node = client.get("/session").json()["nodes"][0]
+    assert len(node["query_history"]) == 1
+    assert node["query_history"][0]["answer"] == "the answer"
+
+
+def test_query_does_not_move_the_active_node(client):
+    main._orchestrator = Orchestrator(FakeLLM())
+    branches = client.post("/branch", json={"node_id": "root", "prompt": "task", "beam_width": 1}).json()["branches"]
+    client.post("/continue", json={"node_id": branches[0]["node_id"], "prompt": "go on"})
+    active_before = [n for n in client.get("/session").json()["nodes"] if n["status"] == "active"][0]
+
+    client.post("/query", json={"node_id": "root", "question": "what happened at the start?"})
+
+    active_after = [n for n in client.get("/session").json()["nodes"] if n["status"] == "active"][0]
+    assert active_after["id"] == active_before["id"]
+
+
+def test_query_unknown_node_is_404(client):
+    r = client.post("/query", json={"node_id": "nope", "question": "what?"})
+    assert r.status_code == 404
+
+
+def test_query_llm_failure_returns_502_and_leaves_history_unchanged(client):
+    main._orchestrator = Orchestrator(FakeLLM(fail_on={0}))
+    r = client.post("/query", json={"node_id": "root", "question": "what is this?"})
+    assert r.status_code == 502
+    node = client.get("/session").json()["nodes"][0]
+    assert node["query_history"] == []
+
+
+def test_chained_query_via_api_includes_the_prior_answer(client):
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=lambda i: f"answer {i}"))
+    first = client.post("/query", json={"node_id": "root", "question": "first question"}).json()["query"]
+    client.post("/query", json={
+        "node_id": "root", "question": "follow-up", "chain_from": first["id"],
+    })
+    node = client.get("/session").json()["nodes"][0]
+    assert len(node["query_history"]) == 2
+    assert node["query_history"][1]["chained_from"] == first["id"]
+
+
+def test_chained_query_unknown_chain_from_is_404(client):
+    main._orchestrator = Orchestrator(FakeLLM())
+    r = client.post("/query", json={"node_id": "root", "question": "follow-up", "chain_from": "nope"})
+    assert r.status_code == 404

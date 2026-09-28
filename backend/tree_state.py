@@ -4,7 +4,7 @@ import copy
 import uuid
 from typing import Dict, List, Optional
 
-from models import TreeNode
+from models import QueryEntry, TreeNode
 
 ROOT_ID = "root"
 
@@ -117,6 +117,18 @@ class TreeStateManager:
         copy via inheritance in Orchestrator, not through this method.
         """
         self._raw(node_id).codebase_context = codebase_context
+
+    def add_query_entry(self, node_id: str, entry: QueryEntry) -> None:
+        """Phase 4 (2026-09-27): appends one `QueryEntry` to `node_id`'s own
+        `query_history`. Joins `score`/`score_source`/`codebase_context` as
+        mutable metadata -- a query answered about a node doesn't change
+        that node's actual content (`code_snapshot`/`context_summary`),
+        it's a side log that accumulates on the node itself. Never touches
+        any other node, and never creates one -- the active node stays
+        untouched by design (that's the whole point of Phase 4: query a
+        past node without moving off the current one).
+        """
+        self._raw(node_id).query_history.append(entry)
 
     def mark_stale(self, node_ids: List[str]) -> None:
         for nid in node_ids:

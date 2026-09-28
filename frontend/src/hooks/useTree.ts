@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TreeNode } from "../types";
+import type { QueryEntry, TreeNode } from "../types";
 import { useTreeWebSocket, type BranchOutEvent } from "./useWebSocket";
 
 const API = "http://localhost:8000";
@@ -108,6 +108,24 @@ export function useTree() {
     // route through the same `run()`/busy-state wrapper as the mutating
     // actions above — this writes to a file, not to the session.
     applyToFile: (nodeId: string) => post<{ path: string }>("/apply-to-file", { node_id: nodeId }),
+    // Phase 4: querying a past node deliberately does NOT touch the active
+    // node or create any new node — reusing `run()`'s global `busy` flag
+    // would incorrectly grey out the main prompt bar while a background
+    // query on some other node is in flight, which defeats the whole
+    // point (query a past decision without disturbing what you're doing
+    // now). Patches just the queried node's `query_history` into local
+    // state directly from the response, instead of a full `/session`
+    // refetch — cheaper, and avoids any risk of clobbering other
+    // in-flight local state.
+    query: async (nodeId: string, question: string, chainFrom?: string) => {
+      const { query: entry } = await post<{ query: QueryEntry }>("/query", {
+        node_id: nodeId, question, chain_from: chainFrom,
+      });
+      setNodes((prev) => prev.map((n) =>
+        n.id === nodeId ? { ...n, query_history: [...n.query_history, entry] } : n
+      ));
+      return entry;
+    },
     save: () => run(() => post("/session/save", {})),
     load: (path: string) => run(async () => { await post("/session/load", { path }); }),
   };
