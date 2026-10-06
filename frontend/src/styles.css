@@ -222,6 +222,46 @@ button:disabled { cursor: not-allowed; }
 .query-form button { align-self: flex-end; }
 .query-error { color: var(--rose-text); font-size: 11.5px; }
 
+/* Phase 5.4: apply/spawn actions and the conflict banner */
+.query-actions { display: flex; gap: 8px; margin-top: 8px; }
+.query-actions button {
+  font-size: 10.5px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--rule-soft);
+  background: transparent;
+  color: var(--ink-dim);
+}
+.query-actions button:hover { background: var(--panel); color: var(--ink); }
+.conflict-banner {
+  margin-top: 10px;
+  border: 1px solid var(--rose);
+  border-radius: var(--radius);
+  background: var(--rose-wash);
+  padding: 10px 12px;
+}
+.conflict-banner p { margin: 0 0 8px; font-size: 12px; color: var(--rose-text); font-weight: 600; }
+.conflict-diff {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: pre-wrap;
+  background: var(--paper-2);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 0 0 8px;
+}
+.conflict-actions { display: flex; gap: 8px; }
+.conflict-actions button {
+  font-size: 10.5px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--rose);
+}
+.conflict-actions button:first-child { background: var(--rose); color: var(--paper-2); }
+
 .inspector h4 {
   margin: 16px 0 6px;
   font-family: var(--font-sans);

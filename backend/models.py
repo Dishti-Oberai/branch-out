@@ -49,6 +49,20 @@ class TreeNode:
 
 
 @dataclass
+class PatchOutcome:
+    """Phase 5: the result of `POST /patch` (Option A) or `POST /merge`
+    (Option C). `conflict=True` means git_engine.merge_code couldn't apply
+    the clarification cleanly -- `node` is None, nothing was created,
+    `diff_preview` carries the raw patch for the frontend's conflict
+    banner. `conflict=False` means a new TreeNode was created -- `node`
+    is set, `diff_preview` is None.
+    """
+    conflict: bool
+    node: Optional[TreeNode] = None
+    diff_preview: Optional[str] = None
+
+
+@dataclass
 class Branch:
     node_id: str
     code: str
@@ -90,6 +104,17 @@ def node_from_dict(d: Dict[str, Any]) -> TreeNode:
 
 def branch_to_dict(branch: Branch) -> Dict[str, Any]:
     return asdict(branch)
+
+
+def patch_outcome_to_dict(outcome: PatchOutcome) -> Dict[str, Any]:
+    """Phase 5: serializes a PatchOutcome for /patch and /merge's response.
+    Reuses node_to_dict for the node half rather than a second asdict()
+    call with its own timestamp handling."""
+    return {
+        "conflict": outcome.conflict,
+        "node": node_to_dict(outcome.node) if outcome.node is not None else None,
+        "diff_preview": outcome.diff_preview,
+    }
 
 
 def query_entry_to_dict(entry: QueryEntry) -> Dict[str, Any]:

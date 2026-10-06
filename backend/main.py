@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Set
@@ -14,12 +13,14 @@ load_dotenv()
 from claude_client import ClaudeClient  # noqa: E402
 from codebase_context import gather_codebase_context  # noqa: E402
 from evaluator import evaluate_branches, rescore_with_tests  # noqa: E402
+from git_engine import make_patch, merge_code  # noqa: E402
 from models import (  # noqa: E402
     DEFAULT_BEAM_WIDTH,
     Branch,
     TreeNode,
     branch_to_dict,
     node_to_dict,
+    patch_outcome_to_dict,
     query_entry_to_dict,
 )
 from orchestrator import LLMGenerationFailed, Orchestrator  # noqa: E402
@@ -56,13 +57,18 @@ _workspace_root: Optional[Path] = None
 
 # Step 3.9: the on-disk hash of a node's target_file at the moment that
 # node was created (None if the file didn't exist yet). Deliberately NOT
-# part of the persisted TreeNode schema — this is an interim, in-memory-
-# only safety net ahead of Phase 5's real git-merge conflict detection,
-# not something worth a schema field that Phase 5 will just delete. Lost
-# on restart or session load, same as the WebSocket client set below;
-# apply-to-file fails open (allows the write) for any node it has no
-# record for, rather than blocking things it can't reason about.
-_source_hashes: Dict[str, Optional[str]] = {}
+# part of the persisted TreeNode schema. Step 3.9 (2026-09-27) originally
+# stored just a hash here (change-detection only, refuse-on-any-change).
+# Phase 5.5 (2026-09-28) upgraded this to store the FULL original file
+# content instead — a hash alone is enough to detect *that* something
+# changed, but real conflict detection (git_engine.merge_code) needs the
+# actual text to diff against. Still deliberately NOT part of the
+# persisted schema (it's meant to be superseded again once nodes carry
+# their own real diff history, if that's ever built) — lost on restart or
+# session load, same as the WebSocket client set below; apply-to-file
+# fails open (allows the write) for any node it has no record for, rather
+# than blocking things it can't reason about.
+_source_snapshots: Dict[str, Optional[str]] = {}
 
 # How often to poll for a client disconnect while an LLM call is in flight.
 # Small enough to cancel promptly, large enough not to busy-loop.
@@ -120,18 +126,18 @@ def _splice_range(original: str, target_range: Dict[str, int], replacement: str)
     return "".join(lines[:start] + [replacement] + lines[end:])
 
 
-def _hash_file(path: Path) -> Optional[str]:
+def _read_file(path: Path) -> Optional[str]:
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        return path.read_text()
     except OSError:
         return None  # file doesn't exist (yet) — a legitimate, common case
 
 
-def _capture_source_hash(node: TreeNode) -> None:
-    """Step 3.9: records what target_file looked like when this node was
-    created, so /apply-to-file can later tell whether it's changed since.
-    A no-op for nodes without target_file, or before any workspace is
-    declared (nothing to hash against yet).
+def _capture_source_snapshot(node: TreeNode) -> None:
+    """Records target_file's full content when this node was created, so
+    /apply-to-file can later diff against it for real conflict detection
+    (Phase 5.5). A no-op for nodes without target_file, or before any
+    workspace is declared (nothing to snapshot against yet).
     """
     if not node.target_file or _workspace_root is None:
         return
@@ -139,7 +145,7 @@ def _capture_source_hash(node: TreeNode) -> None:
         target = _resolve_target_path(node.target_file)
     except HTTPException:
         return  # can't resolve it safely; just don't track it
-    _source_hashes[node.id] = _hash_file(target)
+    _source_snapshots[node.id] = _read_file(target)
 
 
 async def _broadcast(event: str, payload: dict) -> None:
@@ -239,6 +245,18 @@ class QueryRequest(BaseModel):
     chain_from: Optional[str] = None
 
 
+class PatchRequest(BaseModel):
+    source_node_id: str
+    query_id: str
+    target_node_id: str
+    force: bool = False
+
+
+class MergeRequest(BaseModel):
+    source_node_id: str
+    current_node_id: str
+
+
 class ContinueRequest(BaseModel):
     node_id: str
     prompt: str
@@ -274,7 +292,7 @@ async def branch(req: BranchRequest, request: Request):
         raise HTTPException(400, "beam_width must be >= 1")
 
     async def on_branch_ready(b: Branch) -> None:
-        _capture_source_hash(orch().tree.get_node(b.node_id))
+        _capture_source_snapshot(orch().tree.get_node(b.node_id))
         await _broadcast("branch.ready", {"branch": branch_to_dict(b)})
 
     try:
@@ -316,7 +334,7 @@ async def continue_from(req: ContinueRequest, request: Request):
         raise HTTPException(502, str(e))
     except asyncio.CancelledError:
         raise HTTPException(499, "Request cancelled by client")
-    _capture_source_hash(node)
+    _capture_source_snapshot(node)
     return {"node": node_to_dict(node)}
 
 
@@ -365,6 +383,69 @@ async def query(req: QueryRequest, request: Request):
     except asyncio.CancelledError:
         raise HTTPException(499, "Request cancelled by client")
     return {"query": query_entry_to_dict(entry)}
+
+
+@app.post("/patch")
+async def patch(req: PatchRequest, request: Request):
+    """Phase 5.2, Option A: apply a clarification from `source_node_id`
+    (a past node's query answer) onto `target_node_id`. Always runs real
+    conflict detection first (CLAUDE.md: non-negotiable, never skipped
+    even when the caller is confident there's no conflict) — a conflict
+    fires `conflict.detected` and creates nothing; a clean patch creates
+    one new active child of `target_node_id` and re-scores it in the
+    background, same as every other node-creating endpoint.
+    """
+    try:
+        outcome = await _run_cancelable(
+            orch().patch(req.source_node_id, req.query_id, req.target_node_id, force=req.force), request,
+        )
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except LLMGenerationFailed as e:
+        raise HTTPException(502, str(e))
+    except asyncio.CancelledError:
+        raise HTTPException(499, "Request cancelled by client")
+
+    if outcome.conflict:
+        await _broadcast("conflict.detected", {
+            "source_node_id": req.source_node_id,
+            "target_node_id": req.target_node_id,
+            "diff_preview": outcome.diff_preview,
+        })
+    else:
+        _capture_source_snapshot(outcome.node)
+        asyncio.create_task(_evaluate_and_notify(
+            [Branch(node_id=outcome.node.id, code=outcome.node.code_snapshot, reasoning="")]
+        ))
+    return {"outcome": patch_outcome_to_dict(outcome)}
+
+
+@app.post("/merge")
+async def merge(req: MergeRequest, request: Request):
+    """Phase 5.3, Option C: branch fresh from `source_node_id` with the
+    preferences accumulated along the path to `current_node_id` folded
+    in. No conflict detection (there's no divergent target being
+    reconciled against — see Orchestrator.merge's own docstring); always
+    creates a new child of `source_node_id` and makes it active.
+    """
+    try:
+        outcome = await _run_cancelable(
+            orch().merge(req.source_node_id, req.current_node_id), request,
+        )
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except LLMGenerationFailed as e:
+        raise HTTPException(502, str(e))
+    except asyncio.CancelledError:
+        raise HTTPException(499, "Request cancelled by client")
+
+    _capture_source_snapshot(outcome.node)
+    asyncio.create_task(_evaluate_and_notify(
+        [Branch(node_id=outcome.node.id, code=outcome.node.code_snapshot, reasoning="")]
+    ))
+    return {"outcome": patch_outcome_to_dict(outcome)}
 
 
 @app.get("/session")
@@ -429,15 +510,25 @@ async def set_workspace(req: WorkspaceRequest):
 
 
 @app.post("/apply-to-file")
-def apply_to_file(req: ApplyToFileRequest):
-    """Step 3.2: writes a node's code_snapshot to its target_file.
+async def apply_to_file(req: ApplyToFileRequest):
+    """Step 3.2, upgraded by Phase 5.5 (2026-09-28): writes a node's
+    intended content to its target_file.
 
-    Full-file replace — real conflict detection (diffing, merging) is
-    Phase 5's job, once git_engine.py exists. Step 3.9 (2026-09-27) adds
-    a minimal interim safeguard in the meantime: refuses if the file's
-    content has changed since this node was created, rather than blindly
-    overwriting real content with a stale or contextless result (see
-    ROADMAP.md's Phase 3 incident log for what happens without this).
+    Step 3.9's original interim safeguard (2026-09-27) only detected
+    *that* the file had changed since generation and refused outright —
+    a blunt but real fix for the README incident. This is the real fix it
+    was always meant to be superseded by: when the file HAS changed,
+    attempt a genuine merge via `git_engine.merge_code` (the same engine
+    `/patch` uses) instead of just refusing. A clean merge reconciles the
+    node's intended change with whatever else changed in the file; a real
+    conflict fires `conflict.detected` (same event, same payload shape
+    `/patch` uses) and refuses with a 409 — never silently applies a
+    broken merge (CLAUDE.md's git-merge fail-open rule).
+
+    A node with no snapshot on record (no workspace was declared when it
+    was created, a session loaded from before this existed, etc.) still
+    fails open exactly as before — nothing to diff against, so the write
+    proceeds directly.
     """
     try:
         node = orch().tree.get_node(req.node_id)
@@ -449,31 +540,43 @@ def apply_to_file(req: ApplyToFileRequest):
 
     target = _resolve_target_path(node.target_file)
 
-    if req.node_id in _source_hashes:
-        expected = _source_hashes[req.node_id]
-        current = _hash_file(target)
-        if expected != current:
-            raise HTTPException(
-                409,
-                f"{target} has changed since this branch was generated — "
-                "refusing to overwrite it blindly. Re-generate from the "
-                "current file, or apply manually.",
-            )
+    # What this node intends the full file to become — splicing into just
+    # target_range when the node came from a selection (Step 3.2's own
+    # fix), or the whole code_snapshot otherwise.
+    original_at_generation = _source_snapshots.get(req.node_id) or ""
+    intended = (
+        _splice_range(original_at_generation, node.target_range, node.code_snapshot)
+        if node.target_range else node.code_snapshot
+    )
+
+    if req.node_id in _source_snapshots:
+        current_on_disk = _read_file(target) or ""
+        if current_on_disk != original_at_generation:
+            # The file genuinely changed since this node was generated —
+            # attempt a real merge instead of just refusing.
+            patch_text = make_patch(original_at_generation, intended)
+            result = merge_code(current_on_disk, patch_text)
+            if not result.success:
+                await _broadcast("conflict.detected", {
+                    "node_id": req.node_id,
+                    "target_file": str(target),
+                    "diff_preview": result.diff_preview,
+                })
+                raise HTTPException(
+                    409,
+                    f"{target} has changed since this branch was generated, and the "
+                    "change couldn't be merged cleanly — refusing to overwrite it "
+                    "blindly. Re-generate from the current file, or apply manually.",
+                )
+            intended = result.merged_code
 
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        if node.target_range:
-            try:
-                original = target.read_text()
-            except OSError:
-                original = ""
-            target.write_text(_splice_range(original, node.target_range, node.code_snapshot))
-        else:
-            target.write_text(node.code_snapshot)
+        target.write_text(intended)
     except OSError as e:
         raise HTTPException(500, f"Could not write {target}: {e}")
 
-    _source_hashes[req.node_id] = _hash_file(target)
+    _source_snapshots[req.node_id] = intended
     return {"path": str(target)}
 
 

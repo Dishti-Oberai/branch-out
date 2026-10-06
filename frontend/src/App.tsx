@@ -71,6 +71,10 @@ export default function App() {
             onClose={() => tree.select(null)}
             onEditPrompt={(newPrompt) => tree.editPrompt(tree.selected!.id, newPrompt)}
             onQuery={(nodeId, question, chainFrom) => tree.query(nodeId, question, chainFrom)}
+            activeNodeId={tree.active?.id ?? null}
+            onPatch={(sourceNodeId, queryId, targetNodeId, force) =>
+              tree.patch(sourceNodeId, queryId, targetNodeId, force)}
+            onMerge={(sourceNodeId, currentNodeId) => tree.merge(sourceNodeId, currentNodeId)}
             onApplyToFile={async () => {
               setApplyStatus(null);
               try {

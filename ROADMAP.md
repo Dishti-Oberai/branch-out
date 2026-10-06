@@ -338,36 +338,46 @@ Confirmed via `/session` after both calls: active node was still B throughout; n
 
 ---
 
-## Phase 5 — Clarify-and-apply and clarify-and-branch  (needs 2 and 4; renumbered from Phase 4 on 2026-09-26)
+## Phase 5 — Clarify-and-apply and clarify-and-branch  (needs 2 and 4; renumbered from Phase 4 on 2026-09-26; implemented and verified 2026-09-29)
 
-**5.1 Git engine** (`git_engine.py`)
-- [ ] `merge_code(base, patch) -> MergeResult` in a temp git repo, always cleaned up
-- [ ] Conflict returns `success=False` with `diff_preview`; invalid patch never raises
-- [ ] Tests: clean, conflict, invalid, cleanup on failure
+**5.1 Git engine** (`git_engine.py`) — implemented
+- [x] `make_patch(original, revised) -> str` builds a real unified diff (`a/`/`b/` headers, git's own convention); `merge_code(base, patch) -> MergeResult` applies it via a real, temporary `git init` repo's `git apply` (GitPython) — genuine context-aware conflict detection, not a naive string-replace. Always cleaned up (`shutil.rmtree` in a `finally`), even on an unexpected error.
+- [x] Conflict → `success=False` with `diff_preview` (the raw patch); an invalid/unparseable patch never raises — treated as just another kind of conflict.
+- [x] An empty patch (identical content) short-circuits to a trivial success — `git apply` itself errors on a genuinely empty patch file, which would otherwise misreport a clean no-op as a conflict.
+- [x] Tests (`tests/test_git_engine.py`, 12): clean apply, conflict on incompatible divergence, garbage-patch never raises, empty-patch no-op, temp-dir cleanup on both success and failure, a clean apply that preserves unrelated surrounding content, plus 3 regression tests for the trailing-newline bug below.
+- **Real bug found via a real-API check, fixed:** `difflib.unified_diff` requires every line to end in `\n` to serialize correctly. When `original` lacked a trailing newline (a genuinely common real-world case — LLM output very often differs in trailing-newline convention from whatever's already stored; this is exactly what happened with a real node's `code_snapshot`), the last removed line and the first added line got concatenated onto **one corrupted line** with no separator between them, producing an unparseable patch that `git apply` correctly rejected — surfacing as a spurious conflict on a self-patch (source and target identical) that should have applied trivially. **Fix:** new `_ensure_trailing_newline()`, applied to both sides of `make_patch` and to `merge_code`'s `base` before writing it to disk — consistent normalization means a round-tripped file can gain a trailing newline it didn't have before (an accepted, minor, near-universal-convention normalization), never a corrupted diff.
 
-**5.2 `POST /patch` (Option A)**
-- [ ] Always run conflict detection first
-- [ ] Conflict: fire `conflict.detected`, return conflict object, create nothing
-- [ ] No conflict: new child with merged code, async re-score
-- [ ] Tests: no-conflict, conflict, WebSocket event
+**5.2 `POST /patch` (Option A)** — implemented
+- [x] `Orchestrator.patch(source_node_id, query_id, target_node_id, force=False)`: one LLM call incorporates the clarification (a `QueryEntry` on `source_node_id`) into revised code, `make_patch`'s diff against `source`'s original is applied onto `target`'s current code via `merge_code`. Always runs real conflict detection first (CLAUDE.md: non-negotiable, never skipped) — a conflict creates nothing, `PatchOutcome.conflict=True`, `diff_preview` set. A clean merge creates one new active child of `target_node_id` and re-scores it in the background (reuses the existing `_evaluate_and_notify` pipeline via a constructed `Branch`, not a second scoring path).
+- [x] `force=True` (added alongside 5.4): the conflict banner's "Apply anyway" — bypasses the merge and uses the clarification's raw revised code directly. Only ever reached after a real conflict was already shown; never the default.
+- [x] Tests: `tests/test_orchestrator.py` (7 — clean apply creates an active child, conflict creates nothing, unknown source/target/query all raise cleanly, LLM failure creates nothing, `force=True` applies despite conflict); `tests/test_api.py` (7 — full HTTP round-trip for each, plus a dedicated `conflict.detected` WebSocket integration test per CLAUDE.md's "every WebSocket event needs a test proving it fires at the right moment").
 
-**5.3 `POST /merge` (Option C)**
-- [ ] One LLM call extracts user preferences along the path
-- [ ] Patch source node's code; new child of `source_node_id` with preferences injected; set active
-- [ ] Original path untouched; tests
+**5.3 `POST /merge` (Option C)** — implemented, design corrected mid-build
+- **Real design correction, caught before writing the endpoint:** the first draft reused Option A's `query_id`-based clarification directly — simpler, more code reuse with `/patch`, but didn't match this step's own literal spec ("one LLM call extracts user preferences **along the path**"). Flagged via `AskUserQuestion`; user confirmed: build it per spec, not the simpler lookalike.
+- [x] `Orchestrator.merge(source_node_id, current_node_id)`: walks `tree.path_to(current_node_id)`, takes everything strictly after `source_node_id` (the branch that diverged since), composes their `context_summary`s, one LLM call (`_extract_preferences`) extracts a short JSON list of concrete preferences from that path (fails open to `[]` on any parse/LLM failure — informational input, not load-bearing). Combined with `source`'s own existing preferences (deduped), fed into a `generate_branches` call revising `source`'s code — reusing its existing preference-folding mechanism directly rather than building new prompt-composition logic. New child of `source_node_id` (not of `current_node_id`), preferences injected, set active. No conflict detection — there's no divergent target being reconciled against, `PatchOutcome.conflict` is always `False`.
+- [x] `source_node_id` not actually an ancestor of `current_node_id` → `ValueError` → 400 at the API layer.
+- [x] "Original path untouched": confirmed to mean the same orphan/revive semantics every other `_activate_unlocked` call in this codebase already uses (dimmed, never deleted, revivable by backtracking) — not "stays active," since 5.3's own spec explicitly says "set active." Verified directly: the previously-active node's `code_snapshot` is untouched and fully intact after a merge, just `status="orphaned"`.
+- [x] Tests: `tests/test_orchestrator.py` (5 — new child of source with extracted preferences, active set correctly, non-ancestor raises `ValueError`, unknown source raises `KeyError`, extraction failure still proceeds with source's own preferences alone); `tests/test_api.py` (3 — full HTTP round-trip, non-ancestor → 400, unknown node → 404).
 
-**5.4 Conflict banner**
-- [ ] Inline warning in Queries tab (never a modal): description, +/- diff, Apply anyway / Cancel / Spawn branch
-- [ ] Cancel dismisses with no action
+**5.4 Conflict banner** — implemented
+- [x] Inline in the Queries tab (never a modal), scoped to whichever `QueryEntry` triggered it. Each entry gets **"Apply to current"** (Option A against the active node) and **"Spawn branch from here"** (Option C, no clarification needed) actions, shown only when a different node is actually active (querying the active node itself has nothing to apply "to current" against).
+- [x] On conflict: an inline `.conflict-banner` with the description, the raw `diff_preview` in a scrollable monospace block, and three actions — **Apply anyway** (`force: true` retry), **Cancel** (dismisses, `setConflict(null)`, no backend call at all), **Spawn branch** (falls back to Option C).
+- [x] `useTree.ts`'s `run()` wrapper extended to return its result (previously discarded) so `patch()`/`merge()` callers can inspect `outcome.conflict` — existing callers (`branch`, `continueFrom`, etc.) are unaffected, they just don't use the return value.
+- [x] `frontend`'s `tsc && vite build` builds clean.
 
-**5.5 Upgrade Phase 3's file-apply (new step, added 2026-09-26; superseded 2026-09-27 — see note)**
-- [ ] `POST /apply-to-file` now runs the same conflict detection as `/patch` against the real file's *current* on-disk content (which may have changed since the node's code was generated), not just a blind overwrite
-- [ ] Conflict: same inline banner pattern as 5.4, surfaced in the VS Code extension
-- [ ] Tests: clean apply, conflict against modified file, WebSocket event fires in the extension context too
+**5.5 Upgrade Phase 3's file-apply** — implemented
+- [x] The ephemeral `_source_hashes: Dict[str, Optional[str]]` (a hash only — enough to detect *that* something changed, not enough to reconcile it) was replaced with `_source_snapshots: Dict[str, Optional[str]]`, storing the **full original file content** at node-creation time. `hashlib`/`_hash_file` removed entirely — direct string comparison replaces hash comparison, and the stored content is what `make_patch` needs anyway.
+- [x] `POST /apply-to-file` (now `async def`, needed to broadcast): when the file's current on-disk content differs from what was captured at generation time, attempts a **real merge** via the same `git_engine.merge_code` `/patch` uses — reconciling the node's intended change with whatever else changed in the file, instead of Step 3.9's blind refuse-on-any-change. A clean merge writes the reconciled content; a real conflict fires `conflict.detected` (same event, same payload shape as `/patch`'s) and returns 409 — never silently applies a broken merge.
+- [x] A node with no snapshot on record (no workspace declared at creation, a session loaded from before this existed) still fails open exactly as before — nothing to diff against, the write proceeds directly.
+- [x] Tests: `tests/test_api.py` — the existing Step 3.9 tests (`succeeds_when_unchanged`, `refuses_when_changed`→ now genuinely exercises `merge_code`'s conflict path rather than a bare hash mismatch, `allows_reapplying`, `allows_writes_for_nodes_with_no_hash_history`) all still pass under the new mechanism unmodified; two new tests added — **a clean merge despite an unrelated change elsewhere in the file** (5.5's actual improvement over 3.9's blunt refusal — a 20-line fixture with real separation between the two edits, since default diff context is 3 lines each side and edits too close together are a genuine conflict, correctly), and a dedicated `conflict.detected` WebSocket test for this endpoint specifically.
 
-**Note (2026-09-27):** Phase 3's naive apply-to-file actually overwrote a user's real file (see Phase 3's incident log) before this phase existed to protect it. Phase 3's Step 3.9 adds a minimal interim safeguard (hash/mtime-based change detection) now, rather than leaving the gap open for the full duration of Phases 4–5's build. This step remains the *real* fix — full git-merge conflict detection with a proper diff preview — Step 3.9 is a stopgap, not a replacement for it.
+**Note (2026-09-27, superseded 2026-09-29):** Phase 3's naive apply-to-file actually overwrote a user's real file (see Phase 3's incident log) before this phase existed to protect it. Step 3.9's interim hash-check safeguard held the gap for Phases 4–5's build; 5.5 above is the real fix it was always meant to be superseded by.
 
-**Milestone:** clarify from node 2 at node 5, conflict banner, spawn branch rooted at node 2, original path untouched. Plus: editing the real file after a node was generated, then applying that node, correctly surfaces a conflict instead of silently overwriting.
+**Real-API verification (2026-09-29), 5 calls total.** Built a real node A (`double(x)`, no LLM-added trailing newline — this is what surfaced the trailing-newline bug above), queried it for a docstring clarification, `/patch`'d it onto itself (source=target, guaranteed-clean self-patch as a real-pipeline smoke test) — this is what caught the trailing-newline bug on the first attempt; after the fix, retried clean: `conflict: false`, real merged code with the docstring correctly inserted. Then continued A into a real divergent node B (added type hints, changed to bit-shift), and called `/merge(source=A, current=B)`: correctly created a new active child of **A** (not B), with real extracted preferences — `["use bit shift left (<<1) for integer doubling", "fall back to multiplication for floats", "use type hints"]` — genuinely reflecting B's real downstream work, folded into a fresh revision of A's code. Confirmed via `/session`: node B's `code_snapshot` fully intact, `status="orphaned"` — original path untouched in content, exactly as designed.
+
+**Milestone confirmed:** clarify from a past node, apply to current (Option A) — including the conflict banner and force-apply path — and spawn a new branch (Option C) with real, correctly-extracted downstream preferences, original path's content untouched. Plus: editing the real file after a node was generated, then applying that node, correctly surfaces a real conflict (or a clean merge, when the changes don't actually overlap) instead of either silently overwriting or blindly refusing.
+
+**Test count:** 173 backend tests before this phase → **206 passing** after (33 new: 12 in the new `test_git_engine.py`, 12 `orchestrator.py` patch/merge tests, 9 `test_api.py` patch/merge/apply-to-file/WebSocket tests).
 
 ---
 

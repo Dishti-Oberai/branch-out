@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { QueryEntry, TreeNode } from "../types";
+import type { PatchOutcome, QueryEntry, TreeNode } from "../types";
 import { useTreeWebSocket, type BranchOutEvent } from "./useWebSocket";
 
 const API = "http://localhost:8000";
@@ -36,20 +36,26 @@ export function useTree() {
     setNodes((await res.json()).nodes);
   }, []);
 
-  const run = useCallback(async (fn: (signal: AbortSignal) => Promise<unknown>) => {
+  // Returns `fn`'s result (undefined on failure/cancel, already surfaced
+  // via `error`) so callers that need the response — Phase 5's patch()/
+  // merge(), which must know whether a conflict happened — can act on it,
+  // while existing callers that don't care just ignore the return value.
+  const run = useCallback(async <T,>(fn: (signal: AbortSignal) => Promise<T>): Promise<T | undefined> => {
     const controller = new AbortController();
     controllerRef.current = controller;
     setBusy(true);
     setError(null);
     try {
-      await fn(controller.signal);
+      const result = await fn(controller.signal);
       await refresh();
+      return result;
     } catch (e) {
       if (controller.signal.aborted) {
         setError("Cancelled");
       } else {
         setError(e instanceof Error ? e.message : String(e));
       }
+      return undefined;
     } finally {
       setBusy(false);
       controllerRef.current = null;
@@ -126,6 +132,21 @@ export function useTree() {
       ));
       return entry;
     },
+    // Phase 5.2, Option A: apply a clarification (a QueryEntry) from
+    // `sourceNodeId` onto `targetNodeId`. Routed through `run()` (unlike
+    // `query()` above) since this DOES mutate the tree — a new node,
+    // possibly a new active node — the same as branch/continueFrom.
+    // `force=true` is the conflict banner's "Apply anyway" action.
+    patch: (sourceNodeId: string, queryId: string, targetNodeId: string, force = false) =>
+      run((signal) => post<{ outcome: PatchOutcome }>("/patch", {
+        source_node_id: sourceNodeId, query_id: queryId, target_node_id: targetNodeId, force,
+      }, signal)),
+    // Phase 5.3, Option C: branch fresh from `sourceNodeId` with
+    // preferences folded in from the path down to `currentNodeId`.
+    merge: (sourceNodeId: string, currentNodeId: string) =>
+      run((signal) => post<{ outcome: PatchOutcome }>("/merge", {
+        source_node_id: sourceNodeId, current_node_id: currentNodeId,
+      }, signal)),
     save: () => run(() => post("/session/save", {})),
     load: (path: string) => run(async () => { await post("/session/load", { path }); }),
   };

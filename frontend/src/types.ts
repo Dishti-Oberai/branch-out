@@ -35,6 +35,12 @@ export interface TreeNode {
   codebase_context: string | null;
 }
 
+export interface PatchOutcome {
+  conflict: boolean;
+  node: TreeNode | null;
+  diff_preview: string | null;
+}
+
 export interface Branch {
   node_id: string;
   code: string;

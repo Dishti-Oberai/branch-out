@@ -458,3 +458,168 @@ def test_two_queries_on_the_same_node_both_recorded_in_order():
     e2 = asyncio.run(o.query("root", "q2"))
     ids = [q.id for q in o.tree.get_node("root").query_history]
     assert ids == [e1.id, e2.id]
+
+
+# ---- Phase 5.2/5.3: patch (Option A) and merge (Option C) -----------------
+
+def _add_node(o, node_id, parent_id, **overrides):
+    import models
+    defaults = dict(
+        id=node_id, parent_id=parent_id, children_ids=[], code_snapshot="",
+        context_summary="", user_preferences=[], score=None, score_source=None,
+        status="normal", query_history=[], branch_label=node_id,
+    )
+    defaults.update(overrides)
+    o.tree.add_node(models.TreeNode(**defaults))
+
+
+def _add_query(o, node_id, question, answer, entry_id="q1"):
+    import models
+    from datetime import datetime
+    o.tree.add_query_entry(node_id, models.QueryEntry(
+        id=entry_id, question=question, answer=answer, timestamp=datetime.utcnow(),
+    ))
+
+
+def test_patch_applies_cleanly_and_creates_a_new_active_child():
+    llm = FakeLLM(response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "applied it"}')
+    o = Orchestrator(llm)
+    _add_node(o, "source", "root", code_snapshot="line1\nline2\n")
+    _add_node(o, "target", "root", code_snapshot="line1\nline2\n")
+    _add_query(o, "source", "what should line2 be?", "it should say CHANGED")
+
+    outcome = asyncio.run(o.patch("source", "q1", "target"))
+
+    assert outcome.conflict is False
+    assert outcome.node is not None
+    assert outcome.node.code_snapshot == "line1\nCHANGED\n"
+    assert outcome.node.parent_id == "target"
+    assert o.tree.active_id == outcome.node.id
+
+
+def test_patch_conflict_creates_nothing_and_returns_diff_preview():
+    llm = FakeLLM(response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "applied it"}')
+    o = Orchestrator(llm)
+    _add_node(o, "source", "root", code_snapshot="line1\nline2\n")
+    # target diverged incompatibly -- the patch's context won't match
+    _add_node(o, "target", "root", code_snapshot="totally different content\nnot line1 or line2\n")
+    _add_query(o, "source", "what should line2 be?", "it should say CHANGED")
+    nodes_before = o.tree.node_count()
+
+    outcome = asyncio.run(o.patch("source", "q1", "target"))
+
+    assert outcome.conflict is True
+    assert outcome.node is None
+    assert outcome.diff_preview is not None
+    assert o.tree.node_count() == nodes_before  # nothing created
+
+
+def test_patch_unknown_source_node_raises():
+    o = Orchestrator(FakeLLM())
+    _add_node(o, "target", "root")
+    with pytest.raises(KeyError):
+        asyncio.run(o.patch("nope", "q1", "target"))
+
+
+def test_patch_unknown_target_node_raises():
+    o = Orchestrator(FakeLLM())
+    _add_node(o, "source", "root")
+    _add_query(o, "source", "q?", "a.")
+    with pytest.raises(KeyError):
+        asyncio.run(o.patch("source", "q1", "nope"))
+
+
+def test_patch_unknown_query_id_raises():
+    o = Orchestrator(FakeLLM())
+    _add_node(o, "source", "root")
+    _add_node(o, "target", "root")
+    with pytest.raises(KeyError):
+        asyncio.run(o.patch("source", "not-a-real-query", "target"))
+
+
+def test_patch_llm_failure_creates_nothing():
+    o = Orchestrator(FakeLLM(fail_on={0}))
+    _add_node(o, "source", "root")
+    _add_node(o, "target", "root")
+    _add_query(o, "source", "q?", "a.")
+    nodes_before = o.tree.node_count()
+    with pytest.raises(LLMGenerationFailed):
+        asyncio.run(o.patch("source", "q1", "target"))
+    assert o.tree.node_count() == nodes_before
+
+
+def test_merge_creates_a_new_child_of_source_with_extracted_preferences_and_sets_active():
+    call_log = []
+
+    def response_fn(i):
+        call_log.append(i)
+        if len(call_log) == 1:
+            # the preference-extraction call
+            return '["use type hints"]'
+        # the code-revision call (generate_branches JSON schema)
+        return '{"code": "def f(x: int) -> int:\\n    return x\\n", "reasoning": "added hints"}'
+
+    llm = FakeLLM(response_fn=response_fn)
+    o = Orchestrator(llm)
+    _add_node(o, "source", "root", code_snapshot="def f(x):\n    return x\n")
+    _add_node(o, "mid", "source", context_summary="Task: add hints\nApproach: added type hints downstream")
+    _add_node(o, "current", "mid", context_summary="Task: more\nApproach: more work")
+
+    outcome = asyncio.run(o.merge("source", "current"))
+
+    assert outcome.conflict is False
+    assert outcome.node.parent_id == "source"
+    assert "int" in outcome.node.code_snapshot
+    assert "use type hints" in outcome.node.user_preferences
+    assert o.tree.active_id == outcome.node.id
+    # the original path is untouched in content -- still there, just orphaned
+    assert o.tree.get_node("current").code_snapshot == ""  # unchanged from creation
+    assert o.tree.get_node("current").status == "orphaned"
+
+
+def test_merge_source_not_an_ancestor_of_current_raises_value_error():
+    o = Orchestrator(FakeLLM())
+    _add_node(o, "a", "root")
+    _add_node(o, "b", "root")  # sibling, not a descendant relationship
+    with pytest.raises(ValueError):
+        asyncio.run(o.merge("a", "b"))
+
+
+def test_merge_unknown_source_raises_key_error():
+    o = Orchestrator(FakeLLM())
+    _add_node(o, "current", "root")
+    with pytest.raises(KeyError):
+        asyncio.run(o.merge("nope", "current"))
+
+
+def test_merge_preference_extraction_failure_still_proceeds_with_empty_list():
+    # The extraction call fails/returns garbage -- merge must still
+    # complete using just source's own preferences, not block entirely.
+    def response_fn(i):
+        if i == 0:
+            return "not valid json at all"
+        return '{"code": "revised", "reasoning": "ok"}'
+
+    llm = FakeLLM(response_fn=response_fn)
+    o = Orchestrator(llm)
+    _add_node(o, "source", "root", user_preferences=["existing pref"])
+    _add_node(o, "current", "source")
+
+    outcome = asyncio.run(o.merge("source", "current"))
+    assert outcome.conflict is False
+    assert outcome.node.user_preferences == ["existing pref"]
+
+
+def test_patch_force_applies_the_raw_clarified_code_despite_conflict():
+    llm = FakeLLM(response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "ok"}')
+    o = Orchestrator(llm)
+    _add_node(o, "source", "root", code_snapshot="line1\nline2\n")
+    _add_node(o, "target", "root", code_snapshot="totally different\nnot line1 or line2\n")
+    _add_query(o, "source", "what should line2 be?", "it should say CHANGED")
+
+    outcome = asyncio.run(o.patch("source", "q1", "target", force=True))
+
+    assert outcome.conflict is False
+    assert outcome.node is not None
+    assert outcome.node.code_snapshot == "line1\nCHANGED\n"  # raw clarified code, not merged
+    assert o.tree.active_id == outcome.node.id

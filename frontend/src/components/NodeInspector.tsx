@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { QueryEntry, TreeNode } from "../types";
+import type { PatchOutcome, QueryEntry, TreeNode } from "../types";
 import { deriveNodeTitle } from "../nodeTitle";
 import { isVsCodeWebview } from "../vscodeBridge";
 
@@ -18,6 +18,9 @@ export default function NodeInspector({
   onEditPrompt,
   onApplyToFile,
   onQuery,
+  activeNodeId,
+  onPatch,
+  onMerge,
 }: {
   node: TreeNode;
   nodes: TreeNode[];
@@ -28,6 +31,16 @@ export default function NodeInspector({
   onEditPrompt: (newPrompt: string) => void;
   onApplyToFile: () => void;
   onQuery: (nodeId: string, question: string, chainFrom?: string) => Promise<QueryEntry>;
+  // Phase 5.2/5.3: Option A (apply a clarification to the active node) and
+  // Option C (spawn a fresh branch from this node with accumulated
+  // preferences folded in). Both return undefined on failure (the error
+  // already surfaces via the app's global error state) — only a defined
+  // result with `conflict: true` needs handling here, for the banner.
+  activeNodeId: string | null;
+  onPatch: (
+    sourceNodeId: string, queryId: string, targetNodeId: string, force?: boolean
+  ) => Promise<{ outcome: PatchOutcome } | undefined>;
+  onMerge: (sourceNodeId: string, currentNodeId: string) => Promise<{ outcome: PatchOutcome } | undefined>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -73,6 +86,39 @@ export default function NodeInspector({
     }
   }
 
+  // Phase 5.4: the conflict banner. Inline, never a modal, scoped to
+  // whichever query entry triggered it (ROADMAP 5.4). `patchBusy` tracks
+  // just this node's patch/merge actions, separate from `queryBusy`.
+  const [conflict, setConflict] = useState<{ queryId: string; diffPreview: string } | null>(null);
+  const [patchBusy, setPatchBusy] = useState(false);
+  const canActOnClarifications = activeNodeId !== null && activeNodeId !== node.id;
+
+  async function applyToCurrent(queryId: string, force = false) {
+    if (!activeNodeId) return;
+    setPatchBusy(true);
+    try {
+      const result = await onPatch(node.id, queryId, activeNodeId, force);
+      if (result?.outcome.conflict) {
+        setConflict({ queryId, diffPreview: result.outcome.diff_preview ?? "" });
+      } else {
+        setConflict(null);
+      }
+    } finally {
+      setPatchBusy(false);
+    }
+  }
+
+  async function spawnBranch() {
+    if (!activeNodeId) return;
+    setPatchBusy(true);
+    try {
+      await onMerge(node.id, activeNodeId);
+      setConflict(null);
+    } finally {
+      setPatchBusy(false);
+    }
+  }
+
   return (
     <aside className="inspector">
       <header>
@@ -104,6 +150,29 @@ export default function NodeInspector({
                 <li key={q.id} className="query-entry">
                   <p className="query-question">{q.question}</p>
                   <p className="query-answer">{q.answer}</p>
+                  {canActOnClarifications && (
+                    <div className="query-actions">
+                      <button type="button" disabled={patchBusy} onClick={() => applyToCurrent(q.id)}>
+                        Apply to current
+                      </button>
+                      <button type="button" disabled={patchBusy} onClick={spawnBranch}>
+                        Spawn branch from here
+                      </button>
+                    </div>
+                  )}
+                  {conflict?.queryId === q.id && (
+                    <div className="conflict-banner">
+                      <p>⚠ This clarification conflicts with the active node's current code.</p>
+                      <pre className="conflict-diff">{conflict.diffPreview}</pre>
+                      <div className="conflict-actions">
+                        <button type="button" disabled={patchBusy} onClick={() => applyToCurrent(q.id, true)}>
+                          Apply anyway
+                        </button>
+                        <button type="button" onClick={() => setConflict(null)}>Cancel</button>
+                        <button type="button" disabled={patchBusy} onClick={spawnBranch}>Spawn branch</button>
+                      </div>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -111,6 +180,9 @@ export default function NodeInspector({
             <p className="muted">
               Ask this node something — it answers from its own context, without touching whatever's active.
             </p>
+          )}
+          {!canActOnClarifications && node.query_history.length > 0 && activeNodeId === node.id && (
+            <p className="muted">This is the active node — apply/spawn act on clarifications from other nodes.</p>
           )}
           <form
             className="query-form"

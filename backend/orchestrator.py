@@ -1,11 +1,13 @@
 import asyncio
+import json
 from datetime import datetime
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from branch_generator import branch_label, generate_branches
 from codebase_graph import codebase_context_for_prompt
 from context_retriever import get_relevant_context
-from models import DEFAULT_BEAM_WIDTH, Branch, QueryEntry, TreeNode
+from git_engine import make_patch, merge_code
+from models import DEFAULT_BEAM_WIDTH, Branch, PatchOutcome, QueryEntry, TreeNode
 from tree_state import TreeStateManager
 
 OnBranchReady = Callable[[Branch], Awaitable[None]]
@@ -245,6 +247,202 @@ class Orchestrator:
         )
         self.tree.add_query_entry(node_id, entry)
         return entry
+
+    async def _incorporate_clarification(self, source: TreeNode, entry: QueryEntry) -> Branch:
+        """Shared by `patch()` and `merge()`: one LLM call that revises
+        `source`'s code to incorporate a clarification (a Q&A pair from its
+        own `query_history`). Reuses `generate_branches` (beam_width=1) for
+        its existing JSON {code, reasoning} parsing rather than a second,
+        separately-parsed call shape.
+        """
+        prompt = (
+            f"Revise this code to incorporate the following clarification.\n\n"
+            f"Clarification Q: {entry.question}\nClarification A: {entry.answer}"
+        )
+        branches = await generate_branches(
+            prompt, source.context_summary, source.user_preferences, self.llm, beam_width=1,
+            codebase_context=codebase_context_for_prompt(source.codebase_context, source.target_file, True),
+        )
+        if not branches:
+            raise LLMGenerationFailed(
+                f"LLM failed to incorporate the clarification for node {source.id}"
+            )
+        return branches[0]
+
+    def _find_query_entry(self, node: TreeNode, query_id: str) -> QueryEntry:
+        entry = next((q for q in node.query_history if q.id == query_id), None)
+        if entry is None:
+            raise KeyError(f"Unknown query entry: {query_id}")
+        return entry
+
+    async def patch(
+        self, source_node_id: str, query_id: str, target_node_id: str, force: bool = False
+    ) -> PatchOutcome:
+        """Phase 5.2, Option A: apply a clarification from `source_node_id`
+        (a past node) onto `target_node_id` (typically the current/active
+        node) — creates one new child of `target_node_id` with the
+        clarification incorporated, and makes it active. `target_node_id`'s
+        own history is otherwise untouched; `source_node_id`'s subtree is
+        never touched at all.
+
+        Always runs real conflict detection first (CLAUDE.md: non-
+        negotiable for /patch, same as the spec's original /patch design).
+        A conflict creates nothing — `PatchOutcome.conflict=True`,
+        `node=None`, `diff_preview` carries the raw patch for the frontend's
+        conflict banner (Step 5.4) — UNLESS `force=True`, which is that
+        banner's "Apply anyway" action: bypass the merge and use the
+        clarification's raw revised code directly, the same way the very
+        first Phase 3 build always did (before conflict detection existed
+        at all). Only ever reached after a real conflict was already shown
+        to the user on a prior call — never the default.
+        """
+        async with self._lock:
+            return await self._patch_unlocked(source_node_id, query_id, target_node_id, force)
+
+    async def _patch_unlocked(
+        self, source_node_id: str, query_id: str, target_node_id: str, force: bool = False
+    ) -> PatchOutcome:
+        source = self.tree.get_node(source_node_id)
+        target = self.tree.get_node(target_node_id)
+        entry = self._find_query_entry(source, query_id)
+
+        clarified = await self._incorporate_clarification(source, entry)
+        patch_text = make_patch(source.code_snapshot, clarified.code)
+        result = merge_code(target.code_snapshot, patch_text)
+
+        if not result.success and not force:
+            return PatchOutcome(conflict=True, node=None, diff_preview=result.diff_preview)
+
+        merged_code = result.merged_code if result.success else clarified.code
+
+        node = TreeNode(
+            id=self.tree.new_id(),
+            parent_id=target.id,
+            children_ids=[],
+            code_snapshot=merged_code,
+            context_summary=_extend_summary(
+                target.context_summary,
+                f"Clarification from {source.id}: {entry.question}",
+                clarified.reasoning,
+            ),
+            user_preferences=list(target.user_preferences),
+            score=None,
+            score_source=None,
+            status="normal",
+            query_history=[],
+            branch_label=f"Branch {branch_label(len(target.children_ids))}",
+            target_file=target.target_file,
+            target_range=target.target_range,
+            codebase_context=target.codebase_context,
+        )
+        self.tree.add_node(node)
+        self._activate_unlocked(node.id)
+        return PatchOutcome(conflict=False, node=self.tree.get_node(node.id), diff_preview=None)
+
+    async def _extract_preferences(self, path_context: str) -> List[str]:
+        """Phase 5.3's own spec: "One LLM call extracts user preferences
+        along the path." Asks for a short JSON list of concrete, reusable
+        preferences/decisions implied by the given context (not prose).
+        Fails open to an empty list on any LLM/parse failure — a merge
+        with nothing extracted still proceeds with just `source`'s own
+        existing preferences, rather than blocking Option C entirely on
+        this one step (this call is informational input to the real code
+        revision that follows, not load-bearing the way `/continue`'s
+        single call is).
+        """
+        if not path_context.strip():
+            return []
+        prompt = (
+            "From the following conversation history, extract a short JSON "
+            'list of concrete, reusable preferences or decisions the user '
+            'expressed (e.g. ["use type hints", "no external libraries"]). '
+            "Return ONLY the JSON list, nothing else — no prose, no markdown fences.\n\n"
+            f"{path_context}"
+        )
+        try:
+            response = await self.llm.complete(messages=[{"role": "user", "content": prompt}], system="")
+            data = json.loads(response.strip())
+            if isinstance(data, list):
+                return [str(p) for p in data]
+        except Exception:
+            pass
+        return []
+
+    async def merge(self, source_node_id: str, current_node_id: str) -> PatchOutcome:
+        """Phase 5.3, Option C: branch fresh from `source_node_id` (a past
+        node) with the PREFERENCES accumulated along the path from there
+        down to `current_node_id` folded in — not a specific query
+        clarification (that's Option A/`patch()`'s job), but whatever
+        general decisions/constraints were established after diverging
+        from `source_node_id` (e.g. "we started using type hints"). A new
+        child OF `source_node_id`, not of `current_node_id`; the path that
+        led to `current_node_id` is untouched in content (still there,
+        just orphaned/dimmed by the activation switch — the exact same
+        semantics every other `_activate_unlocked` call in this codebase
+        already uses; nothing is ever deleted, and backtracking there
+        again revives it). This is explicitly Option C, not Option B
+        (patch-and-propagate forward through descendants), which is out of
+        scope per CLAUDE.md's Scope discipline.
+
+        No conflict detection here — unlike `patch()`, there's no
+        divergent target to reconcile against; we're revising
+        `source_node_id`'s own code with preferences distilled from its
+        own descendant path and adding the result as its own child.
+        `PatchOutcome.conflict` is always False.
+        """
+        async with self._lock:
+            return await self._merge_unlocked(source_node_id, current_node_id)
+
+    async def _merge_unlocked(self, source_node_id: str, current_node_id: str) -> PatchOutcome:
+        source = self.tree.get_node(source_node_id)
+        current = self.tree.get_node(current_node_id)  # raises KeyError -> 404 if unknown
+
+        full_path = self.tree.path_to(current.id)  # root-first, includes current.id
+        if source.id not in full_path:
+            raise ValueError(f"{source.id} is not an ancestor of {current.id}")
+        diverged_ids = full_path[full_path.index(source.id) + 1:]  # excludes source itself
+        diverged_nodes = [self.tree.get_node(nid) for nid in diverged_ids]
+
+        path_context = "\n---\n".join(n.context_summary for n in diverged_nodes if n.context_summary)
+        extracted = await self._extract_preferences(path_context)
+        # Dedup while preserving order — source's own preferences first,
+        # then newly-extracted ones not already present.
+        combined_preferences = list(source.user_preferences) + [
+            p for p in extracted if p not in source.user_preferences
+        ]
+
+        branches = await generate_branches(
+            "Revise this code to incorporate the preferences accumulated in downstream work.",
+            source.context_summary, combined_preferences, self.llm, beam_width=1,
+            codebase_context=codebase_context_for_prompt(source.codebase_context, source.target_file, True),
+        )
+        if not branches:
+            raise LLMGenerationFailed(f"LLM failed to merge preferences into node {source_node_id}")
+        revised = branches[0]
+
+        node = TreeNode(
+            id=self.tree.new_id(),
+            parent_id=source.id,
+            children_ids=[],
+            code_snapshot=revised.code,
+            context_summary=_extend_summary(
+                source.context_summary,
+                f"Merge: preferences from the path to {current.id}",
+                revised.reasoning,
+            ),
+            user_preferences=combined_preferences,
+            score=None,
+            score_source=None,
+            status="normal",
+            query_history=[],
+            branch_label=f"Branch {branch_label(len(source.children_ids))}",
+            target_file=source.target_file,
+            target_range=source.target_range,
+            codebase_context=source.codebase_context,
+        )
+        self.tree.add_node(node)
+        self._activate_unlocked(node.id)
+        return PatchOutcome(conflict=False, node=self.tree.get_node(node.id), diff_preview=None)
 
     async def backtrack(self, node_id: str) -> TreeNode:
         """Move the active cursor to any node.

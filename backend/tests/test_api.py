@@ -13,7 +13,7 @@ from tests.conftest import FakeLLM
 def client():
     main._orchestrator = Orchestrator(FakeLLM())
     main._workspace_root = None
-    main._source_hashes.clear()
+    main._source_snapshots.clear()
     return TestClient(main.app)
 
 
@@ -403,6 +403,55 @@ def test_apply_to_file_succeeds_when_file_unchanged_since_generation(client, tmp
     assert r.status_code == 200
 
 
+def test_apply_to_file_merges_cleanly_despite_an_unrelated_change_elsewhere(client, tmp_path):
+    # Phase 5.5's actual improvement over Step 3.9's blind refusal: the
+    # file genuinely changed since generation, but the change is unrelated
+    # to what this node touched -- a real merge succeeds instead of
+    # refusing outright. A large enough file with real separation between
+    # the two edits (default diff context is 3 lines each side) so their
+    # hunks don't overlap -- too close together and this would be a real
+    # conflict, correctly, not a bug to work around.
+    client.post("/workspace", json={"root": str(tmp_path)})
+    original_lines = [f"line{i}\n" for i in range(1, 21)]  # 20-line file
+    (tmp_path / "out.py").write_text("".join(original_lines))
+
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: json.dumps({"code": "REPLACED2\n", "reasoning": "r"})
+    ))
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+        "target_range": {"start_line": 2, "end_line": 2},
+    }).json()["node"]
+
+    # An unrelated edit far away (line 19) before applying.
+    changed_lines = list(original_lines)
+    changed_lines[18] = "CHANGED_ELSEWHERE\n"
+    (tmp_path / "out.py").write_text("".join(changed_lines))
+
+    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    assert r.status_code == 200
+    content = (tmp_path / "out.py").read_text()
+    assert "REPLACED2" in content          # this node's edit applied
+    assert "CHANGED_ELSEWHERE" in content  # the unrelated edit survived
+
+
+def test_apply_to_file_conflict_fires_conflict_detected_over_the_websocket(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py",
+    }).json()["node"]
+    (tmp_path / "out.py").write_text("# surprise content\n")
+
+    with client.websocket_connect("/ws") as ws:
+        r = client.post("/apply-to-file", json={"node_id": node["id"]})
+        assert r.status_code == 409
+        event = ws.receive_json()
+
+    assert event["event"] == "conflict.detected"
+    assert event["node_id"] == node["id"]
+    assert event["diff_preview"]
+
+
 def test_apply_to_file_refuses_when_file_changed_since_generation(client, tmp_path):
     client.post("/workspace", json={"root": str(tmp_path)})
     node = client.post("/continue", json={
@@ -438,7 +487,7 @@ def test_apply_to_file_allows_writes_for_nodes_with_no_hash_history(client, tmp_
     node = client.post("/continue", json={
         "node_id": "root", "prompt": "hi", "target_file": "out.py",
     }).json()["node"]
-    main._source_hashes.pop(node["id"], None)
+    main._source_snapshots.pop(node["id"], None)
 
     r = client.post("/apply-to-file", json={"node_id": node["id"]})
     assert r.status_code == 200
@@ -505,3 +554,144 @@ def test_chained_query_unknown_chain_from_is_404(client):
     main._orchestrator = Orchestrator(FakeLLM())
     r = client.post("/query", json={"node_id": "root", "question": "follow-up", "chain_from": "nope"})
     assert r.status_code == 404
+
+
+# ---- Phase 5.2/5.3: /patch (Option A) and /merge (Option C) ---------------
+
+def _add_node(node_id, parent_id, **overrides):
+    from datetime import datetime
+    import models
+    defaults = dict(
+        id=node_id, parent_id=parent_id, children_ids=[], code_snapshot="",
+        context_summary="", user_preferences=[], score=None, score_source=None,
+        status="normal", query_history=[], branch_label=node_id,
+    )
+    defaults.update(overrides)
+    main._orchestrator.tree.add_node(models.TreeNode(**defaults))
+
+
+def _add_query(node_id, question, answer, entry_id="q1"):
+    from datetime import datetime
+    import models
+    main._orchestrator.tree.add_query_entry(node_id, models.QueryEntry(
+        id=entry_id, question=question, answer=answer, timestamp=datetime.utcnow(),
+    ))
+
+
+def test_patch_clean_creates_new_active_node(client):
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "ok"}'
+    ))
+    _add_node("source", "root", code_snapshot="line1\nline2\n")
+    _add_node("target", "root", code_snapshot="line1\nline2\n")
+    _add_query("source", "what should line2 be?", "CHANGED")
+
+    r = client.post("/patch", json={"source_node_id": "source", "query_id": "q1", "target_node_id": "target"})
+    assert r.status_code == 200
+    outcome = r.json()["outcome"]
+    assert outcome["conflict"] is False
+    assert outcome["node"]["code_snapshot"] == "line1\nCHANGED\n"
+    assert outcome["node"]["parent_id"] == "target"
+
+    active = [n for n in client.get("/session").json()["nodes"] if n["status"] == "active"][0]
+    assert active["id"] == outcome["node"]["id"]
+
+
+def test_patch_conflict_fires_conflict_detected_over_the_websocket(client):
+    # CLAUDE.md: every WebSocket event needs an integration test proving
+    # it fires at the right moment -- conflict.detected specifically fires
+    # "the moment conflict detection runs in POST /patch".
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "ok"}'
+    ))
+    _add_node("source", "root", code_snapshot="line1\nline2\n")
+    _add_node("target", "root", code_snapshot="totally different\nnot line1 or line2\n")
+    _add_query("source", "what should line2 be?", "CHANGED")
+
+    with client.websocket_connect("/ws") as ws:
+        r = client.post("/patch", json={"source_node_id": "source", "query_id": "q1", "target_node_id": "target"})
+        assert r.status_code == 200
+        event = ws.receive_json()
+
+    assert event["event"] == "conflict.detected"
+    assert event["source_node_id"] == "source"
+    assert event["target_node_id"] == "target"
+    assert event["diff_preview"]
+
+
+def test_patch_conflict_creates_nothing(client):
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "ok"}'
+    ))
+    _add_node("source", "root", code_snapshot="line1\nline2\n")
+    _add_node("target", "root", code_snapshot="totally different\nnot line1 or line2\n")
+    _add_query("source", "what should line2 be?", "CHANGED")
+    nodes_before = len(client.get("/session").json()["nodes"])
+
+    r = client.post("/patch", json={"source_node_id": "source", "query_id": "q1", "target_node_id": "target"})
+    assert r.status_code == 200
+    outcome = r.json()["outcome"]
+    assert outcome["conflict"] is True
+    assert outcome["node"] is None
+    assert outcome["diff_preview"]
+
+    nodes_after = len(client.get("/session").json()["nodes"])
+    assert nodes_after == nodes_before
+
+
+def test_patch_unknown_node_is_404(client):
+    r = client.post("/patch", json={"source_node_id": "nope", "query_id": "q1", "target_node_id": "root"})
+    assert r.status_code == 404
+
+
+def test_merge_creates_new_active_child_of_source(client):
+    call_log = []
+
+    def response_fn(i):
+        call_log.append(i)
+        if len(call_log) == 1:
+            return '["use type hints"]'
+        return '{"code": "def f(x: int) -> int:\\n    return x\\n", "reasoning": "ok"}'
+
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=response_fn))
+    _add_node("source", "root", code_snapshot="def f(x):\n    return x\n")
+    _add_node("current", "source", context_summary="Task: t\nApproach: a")
+
+    r = client.post("/merge", json={"source_node_id": "source", "current_node_id": "current"})
+    assert r.status_code == 200
+    outcome = r.json()["outcome"]
+    assert outcome["conflict"] is False
+    assert outcome["node"]["parent_id"] == "source"
+    assert "use type hints" in outcome["node"]["user_preferences"]
+
+    active = [n for n in client.get("/session").json()["nodes"] if n["status"] == "active"][0]
+    assert active["id"] == outcome["node"]["id"]
+
+
+def test_merge_source_not_ancestor_is_400(client):
+    _add_node("a", "root")
+    _add_node("b", "root")
+    r = client.post("/merge", json={"source_node_id": "a", "current_node_id": "b"})
+    assert r.status_code == 400
+
+
+def test_merge_unknown_node_is_404(client):
+    r = client.post("/merge", json={"source_node_id": "nope", "current_node_id": "root"})
+    assert r.status_code == 404
+
+
+def test_patch_force_applies_despite_conflict(client):
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "ok"}'
+    ))
+    _add_node("source", "root", code_snapshot="line1\nline2\n")
+    _add_node("target", "root", code_snapshot="totally different\nnot line1 or line2\n")
+    _add_query("source", "what should line2 be?", "CHANGED")
+
+    r = client.post("/patch", json={
+        "source_node_id": "source", "query_id": "q1", "target_node_id": "target", "force": True,
+    })
+    assert r.status_code == 200
+    outcome = r.json()["outcome"]
+    assert outcome["conflict"] is False
+    assert outcome["node"]["code_snapshot"] == "line1\nCHANGED\n"
