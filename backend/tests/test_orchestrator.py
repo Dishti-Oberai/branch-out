@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 
@@ -623,3 +624,56 @@ def test_patch_force_applies_the_raw_clarified_code_despite_conflict():
     assert outcome.node is not None
     assert outcome.node.code_snapshot == "line1\nCHANGED\n"  # raw clarified code, not merged
     assert o.tree.active_id == outcome.node.id
+
+
+# ---- 2026-10-17 amendment: auto/question/code_change intent -------------
+
+def test_intent_auto_strips_target_file_when_model_says_not_a_code_change():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": False}))
+    o = Orchestrator(llm)
+    node = asyncio.run(o.continue_from("root", "task", target_file="out.py", intent="auto"))
+    assert node.target_file is None
+
+
+def test_intent_auto_keeps_target_file_when_model_says_code_change():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": True}))
+    o = Orchestrator(llm)
+    node = asyncio.run(o.continue_from("root", "task", target_file="out.py", intent="auto"))
+    assert node.target_file == "out.py"
+
+
+def test_intent_question_strips_target_file_even_if_model_says_code_change():
+    # Explicit user override always wins over the model's own guess.
+    llm = FakeLLM(response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": True}))
+    o = Orchestrator(llm)
+    node = asyncio.run(o.continue_from("root", "task", target_file="out.py", intent="question"))
+    assert node.target_file is None
+
+
+def test_intent_code_change_keeps_target_file_even_if_model_says_not_a_code_change():
+    # Explicit user override always wins over the model's own guess.
+    llm = FakeLLM(response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": False}))
+    o = Orchestrator(llm)
+    node = asyncio.run(o.continue_from("root", "task", target_file="out.py", intent="code_change"))
+    assert node.target_file == "out.py"
+
+
+def test_intent_defaults_to_auto_when_not_specified():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": False}))
+    o = Orchestrator(llm)
+    node = asyncio.run(o.continue_from("root", "task", target_file="out.py"))  # no intent passed
+    assert node.target_file is None  # behaves as "auto"
+
+
+def test_branch_intent_auto_strips_target_file_per_branch_based_on_its_own_classification():
+    # Each of the 3 parallel branches can classify independently.
+    def response_fn(i):
+        return json.dumps({"code": f"x{i}", "reasoning": "r", "is_code_change": i != 1})
+
+    llm = FakeLLM(response_fn=response_fn)
+    o = Orchestrator(llm)
+    branches = asyncio.run(o.branch("root", "task", beam_width=3, target_file="out.py", intent="auto"))
+    by_index = {b.code: o.tree.get_node(b.node_id).target_file for b in branches}
+    assert by_index["x0"] == "out.py"
+    assert by_index["x1"] is None  # this one classified itself as not a code change
+    assert by_index["x2"] == "out.py"

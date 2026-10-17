@@ -15,7 +15,18 @@ export interface ScoreReadyEvent {
   score_source: "tests" | "llm_judge" | null;
 }
 
-export type BranchOutEvent = BranchReadyEvent | ScoreReadyEvent;
+export interface ActiveEditorContext {
+  file: string;
+  start_line: number | null;
+  end_line: number | null;
+}
+
+export interface ActiveEditorChangedEvent {
+  event: "active_editor.changed";
+  context: ActiveEditorContext | null;
+}
+
+export type BranchOutEvent = BranchReadyEvent | ScoreReadyEvent | ActiveEditorChangedEvent;
 
 /**
  * Connects to the backend's /ws endpoint and calls `onEvent` for every
@@ -39,7 +50,11 @@ export function useTreeWebSocket(onEvent: (event: BranchOutEvent) => void) {
       socket.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
-          if (data?.event === "branch.ready" || data?.event === "score.ready") {
+          if (
+            data?.event === "branch.ready"
+            || data?.event === "score.ready"
+            || data?.event === "active_editor.changed"
+          ) {
             onEventRef.current(data as BranchOutEvent);
           }
         } catch {

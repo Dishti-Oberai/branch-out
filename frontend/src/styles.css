@@ -437,6 +437,26 @@ button:disabled { cursor: not-allowed; }
 .prompt-bar input::placeholder { color: var(--ink-faint); }
 .prompt-bar-spacer { flex: none; width: 1px; align-self: stretch; background: var(--rule-soft); margin: 0 2px; }
 
+/* Phase 5.6: intent toggle + active-file indicator */
+.intent-toggle { display: flex; gap: 2px; border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 2px; }
+.intent-option {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-faint);
+}
+.intent-option.on { background: var(--indigo-wash); color: var(--indigo-ink); }
+.intent-option:disabled { opacity: 0.4; cursor: not-allowed; }
+.active-file-indicator {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
 .error {
   color: var(--rose-text);
   background: var(--rose-wash);

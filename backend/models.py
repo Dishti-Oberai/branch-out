@@ -73,6 +73,13 @@ class Branch:
     # branch.score_source directly): mirrors TreeNode.score_source so the
     # evaluator can tell main.py which value to persist onto the TreeNode.
     score_source: Optional[Literal["tests", "llm_judge"]] = None
+    # Phase 5.6 amendment (2026-10-17): the model's own honest
+    # classification of whether this response was actually a code change
+    # (vs. a question/explanation it left the code unchanged for) — asked
+    # for with no steering bias. Defaults False (conservative) whenever
+    # the model doesn't return it or its output didn't parse at all; see
+    # branch_generator._parse's own docstring for why that direction.
+    is_code_change: bool = False
 
 
 def _iso(d: Dict[str, Any], key: str) -> None:

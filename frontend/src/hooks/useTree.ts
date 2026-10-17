@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { PatchOutcome, QueryEntry, TreeNode } from "../types";
-import { useTreeWebSocket, type BranchOutEvent } from "./useWebSocket";
+import type { Intent, PatchOutcome, QueryEntry, TargetRange, TreeNode } from "../types";
+import { type ActiveEditorContext, useTreeWebSocket, type BranchOutEvent } from "./useWebSocket";
 
 const API = "http://localhost:8000";
 
@@ -30,6 +30,12 @@ export function useTree() {
   // detects the dropped connection via request.is_disconnected() and
   // cancels the outstanding branch generation).
   const controllerRef = useRef<AbortController | null>(null);
+  // Phase 5.6: the VS Code extension's live active file/selection, shared
+  // by both the embedded webview and a standalone browser tab via the
+  // backend's session state — one mechanism, not two independently-built
+  // file pickers. null means no active editor known (code-change actions
+  // stay disabled until one is reported).
+  const [activeEditorContext, setActiveEditorContext] = useState<ActiveEditorContext | null>(null);
 
   const refresh = useCallback(async () => {
     const res = await fetch(`${API}/session`);
@@ -66,6 +72,19 @@ export function useTree() {
     refresh().catch(() => setError("Backend not reachable on :8000"));
   }, [refresh]);
 
+  // Initial fetch — the WebSocket only delivers updates going forward;
+  // a client that just opened (a fresh browser tab, or the webview on
+  // first load) needs the current state immediately.
+  useEffect(() => {
+    fetch(`${API}/active-editor-context`)
+      .then((res) => res.json())
+      .then((data) => setActiveEditorContext(data.context ?? null))
+      .catch(() => {
+        // Backend not reachable — `error` is already set by the /session
+        // fetch above; no need to duplicate it here.
+      });
+  }, []);
+
   const handleWsEvent = useCallback((event: BranchOutEvent) => {
     if (event.event === "branch.ready") {
       setPendingScoreIds((prev) => {
@@ -73,6 +92,8 @@ export function useTree() {
         next.add(event.branch.node_id);
         return next;
       });
+    } else if (event.event === "active_editor.changed") {
+      setActiveEditorContext(event.context);
     } else {
       setPendingScoreIds((prev) => {
         if (!prev.has(event.node_id)) return prev;
@@ -101,11 +122,33 @@ export function useTree() {
     busy,
     error,
     cancel: () => controllerRef.current?.abort(),
-    branch: (nodeId: string, prompt: string, beamWidth?: number) =>
-      run((signal) => post("/branch", { node_id: nodeId, prompt, ...(beamWidth ? { beam_width: beamWidth } : {}) }, signal)),
+    activeEditorContext,
+    branch: (
+      nodeId: string, prompt: string, beamWidth?: number, targetFile?: string, targetRange?: TargetRange,
+      intent: Intent = "auto",
+    ) =>
+      run((signal) => post("/branch", {
+        node_id: nodeId, prompt, ...(beamWidth ? { beam_width: beamWidth } : {}),
+        target_file: targetFile, target_range: targetRange, intent,
+      }, signal)),
     // A single answer, no branching — the default for an ordinary prompt.
-    continueFrom: (nodeId: string, prompt: string) =>
-      run((signal) => post("/continue", { node_id: nodeId, prompt }, signal)),
+    // Phase 5.6: targetFile/targetRange, when given (with a known active
+    // editor), thread straight into the same target_file/target_range
+    // fields the quick-pick already uses — the backend's existing
+    // codebase_context scoping (Phase 3/5.6) supplies the real file
+    // content automatically from there, no need to embed it into the
+    // prompt text client-side.
+    // 2026-10-17 amendment: `intent` ("auto" default, or an explicit
+    // "question"/"code_change" override) decides whether target_file
+    // actually ends up kept on the resulting node — see
+    // `orchestrator._resolve_target`. The toggle no longer needs to
+    // pre-compose steering text client-side; the backend handles it.
+    continueFrom: (
+      nodeId: string, prompt: string, targetFile?: string, targetRange?: TargetRange, intent: Intent = "auto",
+    ) =>
+      run((signal) => post("/continue", {
+        node_id: nodeId, prompt, target_file: targetFile, target_range: targetRange, intent,
+      }, signal)),
     backtrack: (nodeId: string) => run((signal) => post("/backtrack", { node_id: nodeId }, signal)),
     editPrompt: (nodeId: string, newPrompt: string) =>
       run((signal) => post("/edit-prompt", { node_id: nodeId, new_prompt: newPrompt }, signal)),

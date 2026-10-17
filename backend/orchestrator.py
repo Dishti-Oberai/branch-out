@@ -13,6 +13,28 @@ from tree_state import TreeStateManager
 OnBranchReady = Callable[[Branch], Awaitable[None]]
 
 
+def _resolve_target(
+    intent: str, target_file: Optional[str], target_range: Optional[Dict[str, int]], branch: Branch,
+) -> Tuple[Optional[str], Optional[Dict[str, int]]]:
+    """Amendment (2026-10-17): decides the node's *actual* target_file/
+    target_range from the requested `intent` and the model's own
+    `is_code_change` classification -- the user's explicit intent always
+    overrides the model's guess; "auto" defers to it.
+
+    - "question": force no file, regardless of anything else.
+    - "code_change": force the given target through, regardless of the
+      model's classification -- an explicit override trusts the user.
+    - "auto" (default): keep the given target only if the model classified
+      this as a real code change; otherwise strip it, same as a plain
+      question.
+    """
+    if intent == "question":
+        return None, None
+    if intent == "code_change":
+        return target_file, target_range
+    return (target_file, target_range) if branch.is_code_change else (None, None)
+
+
 class LLMGenerationFailed(RuntimeError):
     """A single-call generation (continue_from / edit_prompt) produced nothing.
 
@@ -49,6 +71,7 @@ class Orchestrator:
         target_file: Optional[str] = None,
         target_range: Optional[Dict[str, int]] = None,
         include_codebase: bool = True,
+        intent: str = "auto",
     ) -> List[Branch]:
         """Generate up to `beam_width` children of `node_id`. Never mutates existing code.
 
@@ -58,9 +81,12 @@ class Orchestrator:
         them do. Step 2.4's `branch.ready` WebSocket event is wired through
         this, not through a separate post-hoc loop.
 
-        `target_file`/`target_range` (Phase 3): set on every node this call
-        creates. The web UI never passes these (stays None); the VS Code
-        extension always does.
+        `target_file`/`target_range` (Phase 3): a *candidate* target for
+        each node this call creates — whether it's actually kept depends
+        on `intent` (2026-10-17 amendment): "code_change" forces it through,
+        "question" forces it off, "auto" (default) keeps it only if the
+        model classified its own response as a real code change. See
+        `_resolve_target`.
 
         `include_codebase` (Phase 3, Step 3.7): every created node always
         *inherits* `parent.codebase_context` regardless of this flag — it's
@@ -71,7 +97,7 @@ class Orchestrator:
         """
         async with self._lock:
             return await self._branch_unlocked(
-                node_id, prompt, beam_width, on_branch_ready, target_file, target_range, include_codebase
+                node_id, prompt, beam_width, on_branch_ready, target_file, target_range, include_codebase, intent
             )
 
     async def _branch_unlocked(
@@ -83,6 +109,7 @@ class Orchestrator:
         target_file: Optional[str] = None,
         target_range: Optional[Dict[str, int]] = None,
         include_codebase: bool = True,
+        intent: str = "auto",
     ) -> List[Branch]:
         parent = self.tree.get_node(node_id)
         offset = len(parent.children_ids)
@@ -91,6 +118,7 @@ class Orchestrator:
         async def on_result(i: int, b: Optional[Branch]) -> None:
             if b is None:
                 return  # that call failed; already logged in branch_generator
+            node_target_file, node_target_range = _resolve_target(intent, target_file, target_range, b)
             node = TreeNode(
                 id=self.tree.new_id(),
                 parent_id=parent.id,
@@ -103,8 +131,8 @@ class Orchestrator:
                 status="normal",
                 query_history=[],
                 branch_label=f"Branch {branch_label(offset + i)}",
-                target_file=target_file,
-                target_range=target_range,
+                target_file=node_target_file,
+                target_range=node_target_range,
                 codebase_context=parent.codebase_context,
             )
             self.tree.add_node(node)
@@ -117,6 +145,7 @@ class Orchestrator:
             prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width,
             on_result=on_result,
             codebase_context=codebase_context_for_prompt(parent.codebase_context, target_file, include_codebase),
+            intent=intent,
         )
         return [b for b in results if b is not None]
 
@@ -127,6 +156,7 @@ class Orchestrator:
         target_file: Optional[str] = None,
         target_range: Optional[Dict[str, int]] = None,
         include_codebase: bool = True,
+        intent: str = "auto",
     ) -> TreeNode:
         """Single LLM call, no branching: adds one new child of `node_id` and
         makes it the active node — a reply advances the conversation, the
@@ -136,9 +166,15 @@ class Orchestrator:
 
         `edit_prompt` deliberately does NOT go through this: its new sibling
         stays inactive until the user chooses to make it active.
+
+        `target_file`/`target_range` are a *candidate* target; `intent`
+        (2026-10-17 amendment) decides whether it's actually kept — see
+        `_resolve_target`.
         """
         async with self._lock:
-            node = await self._continue_from_unlocked(node_id, prompt, target_file, target_range, include_codebase)
+            node = await self._continue_from_unlocked(
+                node_id, prompt, target_file, target_range, include_codebase, intent
+            )
             return self._activate_unlocked(node.id)
 
     async def _continue_from_unlocked(
@@ -148,15 +184,18 @@ class Orchestrator:
         target_file: Optional[str] = None,
         target_range: Optional[Dict[str, int]] = None,
         include_codebase: bool = True,
+        intent: str = "auto",
     ) -> TreeNode:
         parent = self.tree.get_node(node_id)
         branches = await generate_branches(
             prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width=1,
             codebase_context=codebase_context_for_prompt(parent.codebase_context, target_file, include_codebase),
+            intent=intent,
         )
         if not branches:
             raise LLMGenerationFailed(f"LLM failed to generate a continuation for node {node_id}")
         branch = branches[0]
+        node_target_file, node_target_range = _resolve_target(intent, target_file, target_range, branch)
         node = TreeNode(
             id=self.tree.new_id(),
             parent_id=parent.id,
@@ -169,8 +208,8 @@ class Orchestrator:
             status="normal",
             query_history=[],
             branch_label=f"Branch {branch_label(len(parent.children_ids))}",
-            target_file=target_file,
-            target_range=target_range,
+            target_file=node_target_file,
+            target_range=node_target_range,
             codebase_context=parent.codebase_context,
         )
         self.tree.add_node(node)

@@ -50,16 +50,17 @@ def test_parse_repairs_a_dropped_n_in_a_json_newline_escape():
     # to the "unparsed model output" fallback, storing the raw JSON wrapper
     # (still containing literal backslashes, unresolved) as "code" — which
     # can never be valid Python. The repair must recover real code instead.
-    code, reasoning = _parse(REAL_MALFORMED_RESPONSE)
+    code, reasoning, is_code_change = _parse(REAL_MALFORMED_RESPONSE)
     assert code.startswith("import unittest\nimport math\n\ndef is_prime(n):\n    if n < 2:")
     assert reasoning == "Trial division."
     compile(code, "<candidate>", "exec")  # must be valid Python, not just non-empty
 
 
 def test_parse_still_falls_back_when_truly_unparseable():
-    code, reasoning = _parse("this is not json and has no recoverable structure at all")
+    code, reasoning, is_code_change = _parse("this is not json and has no recoverable structure at all")
     assert code == "this is not json and has no recoverable structure at all"
     assert reasoning == "(unparsed model output)"
+    assert is_code_change is False  # conservative default when unparseable
 
 
 def test_branch_label_sequence():
@@ -80,3 +81,20 @@ def test_on_result_fires_per_branch_as_it_completes_including_failures():
     by_index = dict(seen)
     assert by_index[1] is None  # the failed one
     assert by_index[0] is not None and by_index[2] is not None
+
+
+def test_parse_extracts_is_code_change_true():
+    code, reasoning, is_code_change = _parse('{"code": "x = 1", "reasoning": "r", "is_code_change": true}')
+    assert is_code_change is True
+
+
+def test_parse_extracts_is_code_change_false():
+    code, reasoning, is_code_change = _parse('{"code": "x = 1", "reasoning": "r", "is_code_change": false}')
+    assert is_code_change is False
+
+
+def test_parse_defaults_is_code_change_false_when_field_missing():
+    # The model is asked for it, but if it ever omits the field entirely,
+    # stay conservative rather than assuming a code change happened.
+    code, reasoning, is_code_change = _parse('{"code": "x = 1", "reasoning": "r"}')
+    assert is_code_change is False

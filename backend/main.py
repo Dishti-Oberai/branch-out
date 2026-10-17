@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Set
+from typing import Dict, Literal, Optional, Set
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -69,6 +69,27 @@ _workspace_root: Optional[Path] = None
 # fails open (allows the write) for any node it has no record for, rather
 # than blocking things it can't reason about.
 _source_snapshots: Dict[str, Optional[str]] = {}
+
+# Phase 5.6 (2026-10-06): the VS Code extension's live active editor/
+# selection, reported continuously via POST /active-editor-context.
+# Deliberately NOT part of the persisted TreeNode schema -- this is
+# ephemeral UI state, not tree content, same category as _workspace_root.
+# None means "no active editor right now" (nothing open, or VS Code
+# hasn't reported yet / isn't running). Shared by both clients (the
+# embedded webview and the standalone browser tab) via GET for the
+# initial fetch and the active_editor.changed WebSocket event for live
+# updates -- one mechanism, not two independently-built file pickers.
+_active_editor_context: Optional[Dict[str, object]] = None
+
+# Phase 5.6: the last content _sync_active_file_to_disk (or /apply-to-file)
+# itself wrote to a given resolved target path -- keyed by file, not by
+# node, since it answers "what did WE last put here" regardless of which
+# node wrote it. This is what makes activation-triggered writes a real
+# three-way merge (ancestor=this, ours=current disk, theirs=the node being
+# switched to) instead of diffing against the activating node's own
+# creation-time baseline, which is always a no-op for backtrack (see
+# _sync_active_file_to_disk's docstring for the real bug this fixed).
+_file_last_synced: Dict[str, Optional[str]] = {}
 
 # How often to poll for a client disconnect while an LLM call is in flight.
 # Small enough to cancel promptly, large enough not to busy-loop.
@@ -146,6 +167,80 @@ def _capture_source_snapshot(node: TreeNode) -> None:
     except HTTPException:
         return  # can't resolve it safely; just don't track it
     _source_snapshots[node.id] = _read_file(target)
+
+
+async def _sync_active_file_to_disk(node: TreeNode) -> None:
+    """Phase 5.6: the real "file always matches the active node" behavior —
+    triggered by activation (continue's auto-activate, backtrack, patch/
+    merge's own activation) instead of a separate manual Apply button.
+
+    Real design correction, caught by a failing test before this ever
+    shipped: the first draft diffed against *this node's own* creation-time
+    baseline (`_source_snapshots[node.id]`) — correct for continue/patch/
+    merge (where there's a genuine new change to merge in), but wrong for
+    backtrack. Backtracking isn't "apply a new change" at all — it's
+    "check out old content" — and a node's own baseline-to-itself diff is
+    always empty by definition, which silently no-op'd every backtrack
+    (confirmed: backtracking from a newer node back to an older one left
+    the newer content on disk, untouched). Fix: the merge's ancestor is
+    `_file_last_synced[path]` — the last content *this mechanism itself*
+    wrote to that file, tracked per file, not per node — falling back to
+    the activating node's own snapshot only when this file has never been
+    synced this way before. This makes the merge a real, meaningful
+    three-way one: ancestor=last synced, ours=whatever's actually on disk
+    now (a possible external edit), theirs=the node being switched to.
+
+    Design decision (2026-10-06, see ROADMAP.md): activation at the tree
+    level always succeeds regardless of what happens here — this is a
+    best-effort side effect, not a gate. A real conflict fires
+    `conflict.detected` (same event, same payload shape every other
+    conflict path uses) so the user finds out immediately, but never
+    blocks the switch itself.
+
+    No-op for a node without `target_file`, or before any workspace is
+    declared — nothing to sync.
+    """
+    if not node.target_file or _workspace_root is None:
+        return
+    try:
+        target = _resolve_target_path(node.target_file)
+    except HTTPException:
+        return  # can't resolve it safely; just don't sync
+    key = str(target)
+
+    # Reconstruct what the whole file looks like with this node's code
+    # applied — needed for target_range nodes, whose code_snapshot is only
+    # ever a snippet, never the whole file.
+    original_at_generation = _source_snapshots.get(node.id) or ""
+    intended = (
+        _splice_range(original_at_generation, node.target_range, node.code_snapshot)
+        if node.target_range else node.code_snapshot
+    )
+
+    ancestor = _file_last_synced.get(key)
+    if ancestor is None:
+        ancestor = _source_snapshots.get(node.id) or ""
+    current_on_disk = _read_file(target) or ""
+
+    if current_on_disk != ancestor:
+        patch_text = make_patch(ancestor, intended)
+        result = merge_code(current_on_disk, patch_text)
+        if not result.success:
+            await _broadcast("conflict.detected", {
+                "node_id": node.id,
+                "target_file": str(target),
+                "diff_preview": result.diff_preview,
+            })
+            return  # best-effort: don't write, don't block activation
+        intended = result.merged_code
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(intended)
+        _file_last_synced[key] = intended
+        _source_snapshots[node.id] = intended
+    except OSError as e:
+        logger.error("Phase 5.6 file sync failed for %s: %s", target, e)  # fail open
 
 
 async def _broadcast(event: str, payload: dict) -> None:
@@ -233,6 +328,7 @@ class BranchRequest(BaseModel):
     target_file: Optional[str] = None
     target_range: Optional[TargetRange] = None
     include_codebase: bool = True
+    intent: Literal["auto", "question", "code_change"] = "auto"
 
 
 class BacktrackRequest(BaseModel):
@@ -263,6 +359,7 @@ class ContinueRequest(BaseModel):
     target_file: Optional[str] = None
     target_range: Optional[TargetRange] = None
     include_codebase: bool = True
+    intent: Literal["auto", "question", "code_change"] = "auto"
 
 
 class EditPromptRequest(BaseModel):
@@ -280,6 +377,12 @@ class SaveRequest(BaseModel):
 
 class WorkspaceRequest(BaseModel):
     root: str
+
+
+class ActiveEditorContextRequest(BaseModel):
+    file: Optional[str] = None
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
 
 
 class ApplyToFileRequest(BaseModel):
@@ -303,6 +406,7 @@ async def branch(req: BranchRequest, request: Request):
                 target_file=req.target_file,
                 target_range=req.target_range.model_dump() if req.target_range else None,
                 include_codebase=req.include_codebase,
+                intent=req.intent,
             ),
             request,
         )
@@ -325,6 +429,7 @@ async def continue_from(req: ContinueRequest, request: Request):
                 target_file=req.target_file,
                 target_range=req.target_range.model_dump() if req.target_range else None,
                 include_codebase=req.include_codebase,
+                intent=req.intent,
             ),
             request,
         )
@@ -335,6 +440,7 @@ async def continue_from(req: ContinueRequest, request: Request):
     except asyncio.CancelledError:
         raise HTTPException(499, "Request cancelled by client")
     _capture_source_snapshot(node)
+    await _sync_active_file_to_disk(node)
     return {"node": node_to_dict(node)}
 
 
@@ -361,6 +467,7 @@ async def backtrack(req: BacktrackRequest):
         node = await orch().backtrack(req.node_id)
     except KeyError as e:
         raise HTTPException(404, str(e))
+    await _sync_active_file_to_disk(node)
     return {"node": node_to_dict(node)}
 
 
@@ -414,6 +521,7 @@ async def patch(req: PatchRequest, request: Request):
         })
     else:
         _capture_source_snapshot(outcome.node)
+        await _sync_active_file_to_disk(outcome.node)
         asyncio.create_task(_evaluate_and_notify(
             [Branch(node_id=outcome.node.id, code=outcome.node.code_snapshot, reasoning="")]
         ))
@@ -442,6 +550,7 @@ async def merge(req: MergeRequest, request: Request):
         raise HTTPException(499, "Request cancelled by client")
 
     _capture_source_snapshot(outcome.node)
+    await _sync_active_file_to_disk(outcome.node)
     asyncio.create_task(_evaluate_and_notify(
         [Branch(node_id=outcome.node.id, code=outcome.node.code_snapshot, reasoning="")]
     ))
@@ -507,6 +616,35 @@ async def set_workspace(req: WorkspaceRequest):
     orch().tree.set_codebase_context("root", snapshot or None)
 
     return {"root": str(_workspace_root), "codebase_context_chars": len(snapshot)}
+
+
+@app.post("/active-editor-context")
+async def set_active_editor_context(req: ActiveEditorContextRequest):
+    """Phase 5.6: the extension calls this on every active-editor/selection
+    change (debounced on its side). `file=None` means "no active editor" —
+    e.g. the user closed the last file, or switched to a non-text view.
+    Broadcasts the same payload over the WebSocket so both connected
+    clients (the embedded webview and a standalone browser tab) update
+    live, without polling.
+    """
+    global _active_editor_context
+    if req.file is None:
+        _active_editor_context = None
+    else:
+        _active_editor_context = {
+            "file": req.file, "start_line": req.start_line, "end_line": req.end_line,
+        }
+    await _broadcast("active_editor.changed", {"context": _active_editor_context})
+    return {"context": _active_editor_context}
+
+
+@app.get("/active-editor-context")
+def get_active_editor_context():
+    """Phase 5.6: for a client that just opened (webview or a fresh browser
+    tab) and needs the current state immediately, before any further
+    change event fires.
+    """
+    return {"context": _active_editor_context}
 
 
 @app.post("/apply-to-file")
@@ -577,6 +715,7 @@ async def apply_to_file(req: ApplyToFileRequest):
         raise HTTPException(500, f"Could not write {target}: {e}")
 
     _source_snapshots[req.node_id] = intended
+    _file_last_synced[str(target)] = intended
     return {"path": str(target)}
 
 

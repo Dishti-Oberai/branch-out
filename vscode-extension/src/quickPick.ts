@@ -21,6 +21,15 @@ import * as api from "./api";
  * and /continue only accept a single `prompt` string. Also added the
  * "include whole codebase?" choice per the Phase 1/3 amendment, wired to
  * the now-implemented `include_codebase` flag.
+ *
+ * 2026-10-17 amendment: the question/code-change picker gained a default
+ * third option, "Auto-detect" — the backend's own model classification
+ * (`orchestrator._resolve_target`) decides whether the result is treated
+ * as a question or a code change, instead of this client pre-composing a
+ * forced "this is a question" steering string. "Ask a question"/"Change
+ * the code" remain as explicit overrides for when you already know which
+ * one you want, exactly as before. The steering text itself now lives
+ * server-side (`branch_generator.py`), not here.
  */
 export async function askAboutSelection(): Promise<void> {
   // Re-declare this window's folder before anything else — see api.ts's
@@ -45,8 +54,9 @@ export async function askAboutSelection(): Promise<void> {
 
   const mode = await vscode.window.showQuickPick(
     [
-      { label: "Ask a question", detail: "Explain only — never touches your file", value: "question" as const },
-      { label: "Change the code", detail: "One reply you can apply to the file", value: "continue" as const },
+      { label: "Auto-detect", detail: "Branch-Out decides — applies only if it's actually a code change", value: "auto" as const },
+      { label: "Ask a question", detail: "Explain only — never touches your file, regardless of what Branch-Out thinks", value: "question" as const },
+      { label: "Change the code", detail: "Always apply to the file, regardless of what Branch-Out thinks", value: "continue" as const },
       { label: "Explore 3 approaches", detail: "Branch into 3 alternatives to apply", value: "branch" as const },
     ],
     { placeHolder: "How should Branch-Out respond?" }
@@ -92,14 +102,7 @@ export async function askAboutSelection(): Promise<void> {
     ? `File: ${relativePath}\n\nSelected code:\n\`\`\`\n${selectedText}\n\`\`\``
     : `File: ${relativePath}\n\nFull file contents:\n\`\`\`\n${fileText}\n\`\`\``;
 
-  const isQuestion = mode.value === "question";
-  // Every backend call must return {"code","reasoning"}, so a plain question
-  // would otherwise have its prose answer stored as "code" and offered as a
-  // file replacement (2026-09-27 bug). Steer the answer into `reasoning`.
-  const questionNote = isQuestion
-    ? "\n\nThis is a QUESTION, not a change request. Put your full answer in the `reasoning` field and set `code` to the original code unchanged."
-    : "";
-  const composedPrompt = `${fileSection}\n\nRequest: ${userPrompt}${questionNote}`;
+  const composedPrompt = `${fileSection}\n\nRequest: ${userPrompt}`;
 
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: "Branch-Out is thinking…" },
@@ -112,23 +115,44 @@ export async function askAboutSelection(): Promise<void> {
           return;
         }
 
-        if (isQuestion) {
-          // No target_file/range: the node can never be applied to a file,
-          // from here or from the tree panel's Apply button.
+        if (mode.value === "question") {
+          // Explicit override: no target_file/range sent at all, and the
+          // backend forces "question" framing regardless of what the
+          // model would have classified — the node can never be applied
+          // to a file, from here or from the tree panel's Apply button.
           const { node } = await api.continueFrom(
-            active.id, composedPrompt, undefined, undefined, includeCodebase
+            active.id, composedPrompt, undefined, undefined, includeCodebase, "question"
           );
           const answer = extractAnswer(node.context_summary, node.code_snapshot);
           const doc = await vscode.workspace.openTextDocument({ content: answer, language: "markdown" });
           await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: true });
-        } else if (mode.value === "continue") {
+        } else if (mode.value === "auto") {
+          // The backend decides, based on the model's own classification
+          // (see orchestrator._resolve_target) -- target_file comes back
+          // set on the node only if it was actually treated as a code
+          // change, so that's exactly what we check here: no separate
+          // "is_code_change" flag to read, the resolved target_file IS
+          // the decision.
           const { node } = await api.continueFrom(
-            active.id, composedPrompt, targetFile, targetRange, includeCodebase
+            active.id, composedPrompt, targetFile, targetRange, includeCodebase, "auto"
+          );
+          if (node.target_file) {
+            await offerToApply(node.id, node.code_snapshot, "Apply this change to the file?");
+          } else {
+            const answer = extractAnswer(node.context_summary, node.code_snapshot);
+            const doc = await vscode.workspace.openTextDocument({ content: answer, language: "markdown" });
+            await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.Beside, preview: true });
+          }
+        } else if (mode.value === "continue") {
+          // Explicit override: target_file is forced through regardless
+          // of what the model would have classified.
+          const { node } = await api.continueFrom(
+            active.id, composedPrompt, targetFile, targetRange, includeCodebase, "code_change"
           );
           await offerToApply(node.id, node.code_snapshot, "Apply this answer to the file?");
         } else {
           const { branches } = await api.branch(
-            active.id, composedPrompt, 3, targetFile, targetRange, includeCodebase
+            active.id, composedPrompt, 3, targetFile, targetRange, includeCodebase, "code_change"
           );
           if (branches.length === 0) {
             vscode.window.showWarningMessage("Branch-Out: no branches were generated.");

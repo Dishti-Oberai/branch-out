@@ -98,13 +98,16 @@ export async function getSession(): Promise<{ nodes: TreeNodeData[] }> {
   return request("GET", "/session");
 }
 
+export type Intent = "auto" | "question" | "code_change";
+
 export async function branch(
   nodeId: string,
   prompt: string,
   beamWidth: number,
   targetFile?: string,
   targetRange?: TargetRange,
-  includeCodebase = true
+  includeCodebase = true,
+  intent: Intent = "auto"
 ): Promise<{ branches: Branch[] }> {
   return request("POST", "/branch", {
     node_id: nodeId,
@@ -113,6 +116,7 @@ export async function branch(
     target_file: targetFile,
     target_range: targetRange,
     include_codebase: includeCodebase,
+    intent,
   });
 }
 
@@ -121,7 +125,8 @@ export async function continueFrom(
   prompt: string,
   targetFile?: string,
   targetRange?: TargetRange,
-  includeCodebase = true
+  includeCodebase = true,
+  intent: Intent = "auto"
 ): Promise<{ node: TreeNodeData }> {
   return request("POST", "/continue", {
     node_id: nodeId,
@@ -129,11 +134,36 @@ export async function continueFrom(
     target_file: targetFile,
     target_range: targetRange,
     include_codebase: includeCodebase,
+    intent,
   });
 }
 
 export async function applyToFile(nodeId: string): Promise<{ path: string }> {
   return request("POST", "/apply-to-file", { node_id: nodeId });
+}
+
+/**
+ * Phase 5.6: reports the active editor/selection into the backend's shared
+ * session state, so both the embedded webview and a standalone browser tab
+ * can show the same "currently targeting" state without either needing its
+ * own file picker. `file: null` means no active editor — closing the last
+ * file, or switching to a non-text view. Swallows failures (consistent
+ * with `ensureWorkspaceDeclared`'s own best-effort semantics) — this fires
+ * on every editor/selection change, far too often to surface errors for.
+ */
+export async function reportActiveEditorContext(
+  file: string | null, targetRange?: TargetRange
+): Promise<void> {
+  try {
+    await request("POST", "/active-editor-context", {
+      file,
+      start_line: targetRange?.start_line ?? null,
+      end_line: targetRange?.end_line ?? null,
+    });
+  } catch {
+    // backend not up, or a transient blip -- not worth surfacing for a
+    // background report that fires this often.
+  }
 }
 
 export function activeNode(nodes: TreeNodeData[]): TreeNodeData | undefined {

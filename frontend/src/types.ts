@@ -35,6 +35,11 @@ export interface TreeNode {
   codebase_context: string | null;
 }
 
+// 2026-10-17 amendment: "auto" (default) lets the model classify its own
+// response; "question"/"code_change" are explicit user overrides that
+// always win over the model's guess.
+export type Intent = "auto" | "question" | "code_change";
+
 export interface PatchOutcome {
   conflict: boolean;
   node: TreeNode | null;

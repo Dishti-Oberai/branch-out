@@ -14,6 +14,8 @@ def client():
     main._orchestrator = Orchestrator(FakeLLM())
     main._workspace_root = None
     main._source_snapshots.clear()
+    main._file_last_synced.clear()
+    main._active_editor_context = None
     return TestClient(main.app)
 
 
@@ -285,7 +287,7 @@ def test_apply_to_file_with_target_range_splices_instead_of_overwriting(client, 
     client.post("/workspace", json={"root": str(tmp_path)})
 
     main._orchestrator = Orchestrator(FakeLLM(
-        response_fn=lambda i: json.dumps({"code": "REPLACED-2\nREPLACED-3\n", "reasoning": "r"})
+        response_fn=lambda i: json.dumps({"code": "REPLACED-2\nREPLACED-3\n", "reasoning": "r", "is_code_change": True})
     ))
     node = client.post("/continue", json={
         "node_id": "root", "prompt": "hi", "target_file": "out.py",
@@ -411,24 +413,27 @@ def test_apply_to_file_merges_cleanly_despite_an_unrelated_change_elsewhere(clie
     # the two edits (default diff context is 3 lines each side) so their
     # hunks don't overlap -- too close together and this would be a real
     # conflict, correctly, not a bug to work around.
+    #
+    # Node built directly via _add_node (not /continue) deliberately --
+    # Phase 5.6 made /continue's auto-activate also auto-sync the file
+    # immediately, which would overwrite this test's own "someone edited
+    # it afterward" setup before apply-to-file is even called. This keeps
+    # the test isolated to what /apply-to-file itself does.
     client.post("/workspace", json={"root": str(tmp_path)})
     original_lines = [f"line{i}\n" for i in range(1, 21)]  # 20-line file
-    (tmp_path / "out.py").write_text("".join(original_lines))
+    original = "".join(original_lines)
+    (tmp_path / "out.py").write_text(original)
 
-    main._orchestrator = Orchestrator(FakeLLM(
-        response_fn=lambda i: json.dumps({"code": "REPLACED2\n", "reasoning": "r"})
-    ))
-    node = client.post("/continue", json={
-        "node_id": "root", "prompt": "hi", "target_file": "out.py",
-        "target_range": {"start_line": 2, "end_line": 2},
-    }).json()["node"]
+    _add_node("n1", "root", code_snapshot="REPLACED2\n",
+              target_file="out.py", target_range={"start_line": 2, "end_line": 2})
+    main._source_snapshots["n1"] = original
 
     # An unrelated edit far away (line 19) before applying.
     changed_lines = list(original_lines)
     changed_lines[18] = "CHANGED_ELSEWHERE\n"
     (tmp_path / "out.py").write_text("".join(changed_lines))
 
-    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    r = client.post("/apply-to-file", json={"node_id": "n1"})
     assert r.status_code == 200
     content = (tmp_path / "out.py").read_text()
     assert "REPLACED2" in content          # this node's edit applied
@@ -436,33 +441,32 @@ def test_apply_to_file_merges_cleanly_despite_an_unrelated_change_elsewhere(clie
 
 
 def test_apply_to_file_conflict_fires_conflict_detected_over_the_websocket(client, tmp_path):
+    # See the note above -- built directly via _add_node, same reason.
     client.post("/workspace", json={"root": str(tmp_path)})
-    node = client.post("/continue", json={
-        "node_id": "root", "prompt": "hi", "target_file": "out.py",
-    }).json()["node"]
+    _add_node("n1", "root", code_snapshot="print(1)\n", target_file="out.py")
+    main._source_snapshots["n1"] = None  # file didn't exist at "generation" time
     (tmp_path / "out.py").write_text("# surprise content\n")
 
     with client.websocket_connect("/ws") as ws:
-        r = client.post("/apply-to-file", json={"node_id": node["id"]})
+        r = client.post("/apply-to-file", json={"node_id": "n1"})
         assert r.status_code == 409
         event = ws.receive_json()
 
     assert event["event"] == "conflict.detected"
-    assert event["node_id"] == node["id"]
+    assert event["node_id"] == "n1"
     assert event["diff_preview"]
 
 
 def test_apply_to_file_refuses_when_file_changed_since_generation(client, tmp_path):
+    # See the note above -- built directly via _add_node, same reason.
     client.post("/workspace", json={"root": str(tmp_path)})
-    node = client.post("/continue", json={
-        "node_id": "root", "prompt": "hi", "target_file": "out.py",
-    }).json()["node"]
+    _add_node("n1", "root", code_snapshot="print(1)\n", target_file="out.py")
+    main._source_snapshots["n1"] = None  # file didn't exist at "generation" time
 
-    # the file didn't exist when the node was created (hash captured as
-    # None); someone/something creates it in the meantime
+    # someone/something creates it in the meantime
     (tmp_path / "out.py").write_text("# surprise content\n")
 
-    r = client.post("/apply-to-file", json={"node_id": node["id"]})
+    r = client.post("/apply-to-file", json={"node_id": "n1"})
     assert r.status_code == 409
 
 
@@ -695,3 +699,146 @@ def test_patch_force_applies_despite_conflict(client):
     outcome = r.json()["outcome"]
     assert outcome["conflict"] is False
     assert outcome["node"]["code_snapshot"] == "line1\nCHANGED\n"
+
+
+# ---- Phase 5.6: live active-editor-context --------------------------------
+
+def test_active_editor_context_starts_as_none(client):
+    r = client.get("/active-editor-context")
+    assert r.status_code == 200
+    assert r.json()["context"] is None
+
+
+def test_setting_active_editor_context_round_trips(client):
+    r = client.post("/active-editor-context", json={"file": "util.py", "start_line": 2, "end_line": 4})
+    assert r.status_code == 200
+    assert r.json()["context"] == {"file": "util.py", "start_line": 2, "end_line": 4}
+
+    r2 = client.get("/active-editor-context")
+    assert r2.json()["context"] == {"file": "util.py", "start_line": 2, "end_line": 4}
+
+
+def test_setting_file_none_clears_active_editor_context(client):
+    client.post("/active-editor-context", json={"file": "util.py", "start_line": 1, "end_line": 1})
+    r = client.post("/active-editor-context", json={"file": None})
+    assert r.json()["context"] is None
+    assert client.get("/active-editor-context").json()["context"] is None
+
+
+def test_active_editor_context_change_fires_over_the_websocket(client):
+    with client.websocket_connect("/ws") as ws:
+        client.post("/active-editor-context", json={"file": "util.py", "start_line": 2, "end_line": 4})
+        event = ws.receive_json()
+    assert event["event"] == "active_editor.changed"
+    assert event["context"] == {"file": "util.py", "start_line": 2, "end_line": 4}
+
+
+# ---- Phase 5.6: activation triggers a real file write ---------------------
+
+def test_continue_with_target_file_writes_it_immediately_no_separate_apply(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: json.dumps({"code": "written by continue\n", "reasoning": "r", "is_code_change": True})
+    ))
+    client.post("/continue", json={"node_id": "root", "prompt": "hi", "target_file": "out.py"})
+    # No /apply-to-file call at all -- the file should already be there.
+    assert (tmp_path / "out.py").read_text() == "written by continue\n"
+
+
+def test_backtrack_to_a_past_node_rewrites_the_file_to_match_it(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=lambda i: json.dumps({"code": "V1\n", "reasoning": "r", "is_code_change": True})))
+    node1 = client.post("/continue", json={"node_id": "root", "prompt": "hi", "target_file": "out.py"}).json()["node"]
+    assert (tmp_path / "out.py").read_text() == "V1\n"
+
+    main._orchestrator.llm = FakeLLM(response_fn=lambda i: json.dumps({"code": "V2\n", "reasoning": "r", "is_code_change": True}))
+    client.post("/continue", json={"node_id": node1["id"], "prompt": "more", "target_file": "out.py"})
+    assert (tmp_path / "out.py").read_text() == "V2\n"  # the newer node auto-wrote over V1
+
+    client.post("/backtrack", json={"node_id": node1["id"]})
+    assert (tmp_path / "out.py").read_text() == "V1\n"  # back to matching the now-active node
+
+
+def test_activation_conflict_still_lets_the_switch_proceed(client, tmp_path):
+    # Design decision (2026-10-06): activation always succeeds at the tree
+    # level even when the file-sync side effect conflicts -- never blocks
+    # tree navigation.
+    client.post("/workspace", json={"root": str(tmp_path)})
+    _add_node("n1", "root", code_snapshot="print(1)\n", target_file="out.py")
+    main._source_snapshots["n1"] = None  # file didn't exist at "generation" time
+    (tmp_path / "out.py").write_text("# unrelated content already here\n")
+
+    with client.websocket_connect("/ws") as ws:
+        r = client.post("/backtrack", json={"node_id": "n1"})
+        event = ws.receive_json()
+
+    assert r.status_code == 200
+    assert r.json()["node"]["id"] == "n1"
+    # the tree switch happened regardless of the file conflict
+    active = [n for n in client.get("/session").json()["nodes"] if n["status"] == "active"][0]
+    assert active["id"] == "n1"
+    # the conflict was still surfaced
+    assert event["event"] == "conflict.detected"
+    # and the file was correctly left untouched, not clobbered
+    assert (tmp_path / "out.py").read_text() == "# unrelated content already here\n"
+
+
+def test_patch_success_writes_the_target_file_automatically(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "ok"}'
+    ))
+    _add_node("source", "root", code_snapshot="line1\nline2\n")
+    _add_node("target", "root", code_snapshot="line1\nline2\n", target_file="out.py")
+    (tmp_path / "out.py").write_text("line1\nline2\n")
+    main._source_snapshots["target"] = "line1\nline2\n"
+    _add_query("source", "what should line2 be?", "CHANGED")
+
+    r = client.post("/patch", json={"source_node_id": "source", "query_id": "q1", "target_node_id": "target"})
+    assert r.status_code == 200
+    assert r.json()["outcome"]["conflict"] is False
+    assert (tmp_path / "out.py").read_text() == "line1\nCHANGED\n"
+
+
+def test_node_without_target_file_activation_is_a_no_op_for_disk(client, tmp_path):
+    client.post("/workspace", json={"root": str(tmp_path)})
+    r = client.post("/continue", json={"node_id": "root", "prompt": "hi"})  # no target_file
+    assert r.status_code == 200  # unaffected by the sync hook at all
+
+
+# ---- 2026-10-17 amendment: auto/question/code_change intent via HTTP -----
+
+def test_continue_intent_auto_strips_target_file_when_model_says_not_a_code_change(client):
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": False})
+    ))
+    r = client.post("/continue", json={"node_id": "root", "prompt": "hi", "target_file": "out.py"})
+    assert r.json()["node"]["target_file"] is None
+
+
+def test_continue_intent_question_overrides_model_classification(client):
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": True})
+    ))
+    r = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py", "intent": "question",
+    })
+    assert r.json()["node"]["target_file"] is None
+
+
+def test_continue_intent_code_change_overrides_model_classification(client):
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": False})
+    ))
+    r = client.post("/continue", json={
+        "node_id": "root", "prompt": "hi", "target_file": "out.py", "intent": "code_change",
+    })
+    assert r.json()["node"]["target_file"] == "out.py"
+
+
+def test_continue_intent_defaults_to_auto(client):
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: json.dumps({"code": "x", "reasoning": "r", "is_code_change": False})
+    ))
+    r = client.post("/continue", json={"node_id": "root", "prompt": "hi", "target_file": "out.py"})
+    assert r.json()["node"]["target_file"] is None  # behaves as auto, not forced through
