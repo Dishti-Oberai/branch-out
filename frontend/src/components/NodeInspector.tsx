@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { PatchOutcome, QueryEntry, TreeNode } from "../types";
-import { deriveNodeTitle } from "../nodeTitle";
+import { deriveLatestAnswer, deriveNodeTitle } from "../nodeTitle";
 import { isVsCodeWebview } from "../vscodeBridge";
 
 // Phase 4 (2026-09-27): Queries tab. Node click opens it by default (per
@@ -21,6 +21,7 @@ export default function NodeInspector({
   activeNodeId,
   onPatch,
   onMerge,
+  onMergeSiblings,
 }: {
   node: TreeNode;
   nodes: TreeNode[];
@@ -41,6 +42,9 @@ export default function NodeInspector({
     sourceNodeId: string, queryId: string, targetNodeId: string, force?: boolean
   ) => Promise<{ outcome: PatchOutcome } | undefined>;
   onMerge: (sourceNodeId: string, currentNodeId: string) => Promise<{ outcome: PatchOutcome } | undefined>;
+  // Phase 6.2: combine this node with a sibling (same parent) into one new
+  // synthesized node — see orchestrator.merge_siblings's own docstring.
+  onMergeSiblings: (nodeAId: string, nodeBId: string) => Promise<{ node: TreeNode } | undefined>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -50,6 +54,7 @@ export default function NodeInspector({
   const [queryError, setQueryError] = useState<string | null>(null);
   const isRoot = node.parent_id === null;
   const title = deriveNodeTitle(node);
+  const latestAnswer = deriveLatestAnswer(node);
   // Step 3.5: only shown inside the VS Code webview, and only for nodes
   // that actually have somewhere to apply to.
   const canApplyToFile = isVsCodeWebview() && node.target_file !== null;
@@ -91,7 +96,41 @@ export default function NodeInspector({
   // just this node's patch/merge actions, separate from `queryBusy`.
   const [conflict, setConflict] = useState<{ queryId: string; diffPreview: string } | null>(null);
   const [patchBusy, setPatchBusy] = useState(false);
-  const canActOnClarifications = activeNodeId !== null && activeNodeId !== node.id;
+  // Real bug, found via manual testing (2026-10-18): both buttons used to
+  // share one `canActOnClarifications` flag, hidden entirely whenever you
+  // queried the ACTIVE node about itself. But "Apply to current" (/patch)
+  // revises THIS node's code with the clarification and merges it onto
+  // the target -- when source and target are the same node, that's just
+  // "revise the active node with this answer," which orchestrator.py's
+  // _incorporate_clarification/merge_code handle correctly with no special
+  // case needed. "Spawn branch from here" (/merge) is different: it never
+  // even looks at the query's answer, only at preferences accumulated
+  // along the path FROM this node TO the active one -- when they're the
+  // same node that path is empty, so it would silently produce a branch
+  // that ignores the clarification entirely. Split in two: apply-to-
+  // current only needs a known active node; spawn-branch still needs a
+  // genuinely different one to have anything to merge.
+  const canApplyToCurrent = activeNodeId !== null;
+  const canSpawnBranch = activeNodeId !== null && activeNodeId !== node.id;
+
+  // Phase 6.2: other children of the same parent — root has no parent, so
+  // it never has siblings by definition (every other node shares SOME
+  // parent, even if root itself).
+  const siblings = node.parent_id
+    ? nodes.filter((n) => n.parent_id === node.parent_id && n.id !== node.id)
+    : [];
+  const [mergeSiblingId, setMergeSiblingId] = useState("");
+  const [mergeBusy, setMergeBusy] = useState(false);
+
+  async function mergeWithSibling() {
+    if (!mergeSiblingId) return;
+    setMergeBusy(true);
+    try {
+      await onMergeSiblings(node.id, mergeSiblingId);
+    } finally {
+      setMergeBusy(false);
+    }
+  }
 
   async function applyToCurrent(queryId: string, force = false) {
     if (!activeNodeId) return;
@@ -150,14 +189,18 @@ export default function NodeInspector({
                 <li key={q.id} className="query-entry">
                   <p className="query-question">{q.question}</p>
                   <p className="query-answer">{q.answer}</p>
-                  {canActOnClarifications && (
+                  {(canApplyToCurrent || canSpawnBranch) && (
                     <div className="query-actions">
-                      <button type="button" disabled={patchBusy} onClick={() => applyToCurrent(q.id)}>
-                        Apply to current
-                      </button>
-                      <button type="button" disabled={patchBusy} onClick={spawnBranch}>
-                        Spawn branch from here
-                      </button>
+                      {canApplyToCurrent && (
+                        <button type="button" disabled={patchBusy} onClick={() => applyToCurrent(q.id)}>
+                          Apply to current
+                        </button>
+                      )}
+                      {canSpawnBranch && (
+                        <button type="button" disabled={patchBusy} onClick={spawnBranch}>
+                          Spawn branch from here
+                        </button>
+                      )}
                     </div>
                   )}
                   {conflict?.queryId === q.id && (
@@ -169,7 +212,9 @@ export default function NodeInspector({
                           Apply anyway
                         </button>
                         <button type="button" onClick={() => setConflict(null)}>Cancel</button>
-                        <button type="button" disabled={patchBusy} onClick={spawnBranch}>Spawn branch</button>
+                        {canSpawnBranch && (
+                          <button type="button" disabled={patchBusy} onClick={spawnBranch}>Spawn branch</button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -181,8 +226,11 @@ export default function NodeInspector({
               Ask this node something — it answers from its own context, without touching whatever's active.
             </p>
           )}
-          {!canActOnClarifications && node.query_history.length > 0 && activeNodeId === node.id && (
-            <p className="muted">This is the active node — apply/spawn act on clarifications from other nodes.</p>
+          {!canSpawnBranch && node.query_history.length > 0 && activeNodeId === node.id && (
+            <p className="muted">
+              This is the active node — "Spawn branch from here" isn't offered since there's nothing
+              downstream to merge; use "Apply to current" to revise it with this answer.
+            </p>
           )}
           <form
             className="query-form"
@@ -240,6 +288,33 @@ export default function NodeInspector({
           {node.user_preferences.length ? (
             <ul>{node.user_preferences.map((p) => <li key={p}>{p}</li>)}</ul>
           ) : <p className="muted">none</p>}
+          {siblings.length > 0 && (
+            <>
+              <h4>Merge with sibling branch</h4>
+              <div className="merge-siblings-row">
+                <select
+                  value={mergeSiblingId}
+                  onChange={(e) => setMergeSiblingId(e.target.value)}
+                  disabled={mergeBusy}
+                >
+                  <option value="">Choose a sibling…</option>
+                  {siblings.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.branch_label} — {deriveNodeTitle(s) ?? s.id}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" disabled={!mergeSiblingId || mergeBusy} onClick={mergeWithSibling}>
+                  {mergeBusy ? "Merging…" : "Synthesize combined approach"}
+                </button>
+              </div>
+              <p className="muted">
+                Combines both branches' code into one new node via the model — not a pick, a real synthesis.
+              </p>
+            </>
+          )}
+          <h4>Response</h4>
+          <p className="node-answer">{latestAnswer ?? "—"}</p>
           <h4>Context</h4>
           <pre>{node.context_summary || "—"}</pre>
           <h4 className="code-snapshot-heading">

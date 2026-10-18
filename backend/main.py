@@ -353,6 +353,11 @@ class MergeRequest(BaseModel):
     current_node_id: str
 
 
+class MergeSiblingsRequest(BaseModel):
+    node_a_id: str
+    node_b_id: str
+
+
 class ContinueRequest(BaseModel):
     node_id: str
     prompt: str
@@ -555,6 +560,33 @@ async def merge(req: MergeRequest, request: Request):
         [Branch(node_id=outcome.node.id, code=outcome.node.code_snapshot, reasoning="")]
     ))
     return {"outcome": patch_outcome_to_dict(outcome)}
+
+
+@app.post("/merge-siblings")
+async def merge_siblings(req: MergeSiblingsRequest, request: Request):
+    """Phase 6.2: combine two sibling branches (same parent) into one new
+    node via LLM synthesis -- see Orchestrator.merge_siblings's own
+    docstring for why this is distinct from /merge and /patch above.
+    """
+    try:
+        node = await _run_cancelable(
+            orch().merge_siblings(req.node_a_id, req.node_b_id), request,
+        )
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except LLMGenerationFailed as e:
+        raise HTTPException(502, str(e))
+    except asyncio.CancelledError:
+        raise HTTPException(499, "Request cancelled by client")
+
+    _capture_source_snapshot(node)
+    await _sync_active_file_to_disk(node)
+    asyncio.create_task(_evaluate_and_notify(
+        [Branch(node_id=node.id, code=node.code_snapshot, reasoning="")]
+    ))
+    return {"node": node_to_dict(node)}
 
 
 @app.get("/session")

@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 
-const WS_URL = "ws://localhost:8000/ws";
+// Phase 6.2: mirrors useTree.ts's VITE_API_URL override, same reason.
+const WS_URL = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL.replace(/^http/, "ws")}/ws`
+  : "ws://localhost:8000/ws";
 
 export interface BranchReadyEvent {
   event: "branch.ready";

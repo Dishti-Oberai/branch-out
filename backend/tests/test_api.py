@@ -684,6 +684,35 @@ def test_merge_unknown_node_is_404(client):
     assert r.status_code == 404
 
 
+def test_merge_siblings_creates_new_active_child_of_shared_parent(client):
+    main._orchestrator = Orchestrator(FakeLLM(
+        response_fn=lambda i: '{"code": "combined", "reasoning": "best of both"}'
+    ))
+    _add_node("a", "root", code_snapshot="approach a")
+    _add_node("b", "root", code_snapshot="approach b")
+
+    r = client.post("/merge-siblings", json={"node_a_id": "a", "node_b_id": "b"})
+    assert r.status_code == 200
+    node = r.json()["node"]
+    assert node["parent_id"] == "root"
+    assert node["code_snapshot"] == "combined"
+
+    active = [n for n in client.get("/session").json()["nodes"] if n["status"] == "active"][0]
+    assert active["id"] == node["id"]
+
+
+def test_merge_siblings_different_parents_is_400(client):
+    _add_node("a", "root")
+    _add_node("b", "a")
+    r = client.post("/merge-siblings", json={"node_a_id": "a", "node_b_id": "b"})
+    assert r.status_code == 400
+
+
+def test_merge_siblings_unknown_node_is_404(client):
+    r = client.post("/merge-siblings", json={"node_a_id": "nope", "node_b_id": "root"})
+    assert r.status_code == 404
+
+
 def test_patch_force_applies_despite_conflict(client):
     main._orchestrator = Orchestrator(FakeLLM(
         response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "ok"}'

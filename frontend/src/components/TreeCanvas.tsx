@@ -97,15 +97,27 @@ export default function TreeCanvas({
       position: pos.get(n.id) ?? { x: 0, y: 0 },
       data: { node: n, pending: pendingScoreIds.has(n.id) },
     }));
+    // 2026-10-17: a single child sits in the same column as its parent
+    // (layout()'s own centering math), so "straight" between them is
+    // already a true vertical line. A branch with multiple children can't
+    // all share the parent's column -- "straight" there draws a diagonal
+    // per child, which read as messy. For those, "smoothstep" draws the
+    // standard org-chart vertical-then-horizontal-then-vertical elbow
+    // instead, which stays neat regardless of how wide the fan-out is.
     const rfEdges: Edge[] = nodes
       .filter((n) => n.parent_id)
-      .map((n) => ({
-        id: `${n.parent_id}-${n.id}`,
-        source: n.parent_id!,
-        target: n.id,
-        type: "step",
-        style: edgeStyle(n.status),
-      }));
+      .map((n) => {
+        const parentPos = pos.get(n.parent_id!);
+        const childPos = pos.get(n.id);
+        const sameColumn = parentPos && childPos && Math.abs(parentPos.x - childPos.x) < 1;
+        return {
+          id: `${n.parent_id}-${n.id}`,
+          source: n.parent_id!,
+          target: n.id,
+          type: sameColumn ? "straight" : "smoothstep",
+          style: edgeStyle(n.status),
+        };
+      });
     return { rfNodes, rfEdges };
   }, [nodes, pendingScoreIds]);
 

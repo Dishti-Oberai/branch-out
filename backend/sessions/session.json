@@ -1,0 +1,95 @@
+{
+  "nodes": [
+    {
+      "id": "root",
+      "parent_id": null,
+      "children_ids": [
+        "f085f608",
+        "08184c53",
+        "6dba47da"
+      ],
+      "code_snapshot": "",
+      "context_summary": "",
+      "user_preferences": [],
+      "score": null,
+      "score_source": null,
+      "status": "normal",
+      "query_history": [],
+      "branch_label": "Root",
+      "created_at": "2026-10-18T10:42:13.065979",
+      "target_file": null,
+      "target_range": null,
+      "codebase_context": null
+    },
+    {
+      "id": "f085f608",
+      "parent_id": "root",
+      "children_ids": [
+        "3bef4d89"
+      ],
+      "code_snapshot": "def f(): pass",
+      "context_summary": "Task: write a binary search\nApproach: a synthesized approach 1",
+      "user_preferences": [],
+      "score": 1.0,
+      "score_source": "llm_judge",
+      "status": "normal",
+      "query_history": [],
+      "branch_label": "Branch A",
+      "created_at": "2026-10-18T10:42:14.555403",
+      "target_file": null,
+      "target_range": null,
+      "codebase_context": null
+    },
+    {
+      "id": "08184c53",
+      "parent_id": "root",
+      "children_ids": [],
+      "code_snapshot": "def f(): pass",
+      "context_summary": "Task: write a binary search\nApproach: a synthesized approach 2",
+      "user_preferences": [],
+      "score": 0.9,
+      "score_source": "llm_judge",
+      "status": "orphaned",
+      "query_history": [],
+      "branch_label": "Branch B",
+      "created_at": "2026-10-18T10:42:14.555536",
+      "target_file": null,
+      "target_range": null,
+      "codebase_context": null
+    },
+    {
+      "id": "6dba47da",
+      "parent_id": "root",
+      "children_ids": [],
+      "code_snapshot": "def f(): pass",
+      "context_summary": "Task: write a binary search\nApproach: a synthesized approach 3",
+      "user_preferences": [],
+      "score": 0.8,
+      "score_source": "llm_judge",
+      "status": "orphaned",
+      "query_history": [],
+      "branch_label": "Branch C",
+      "created_at": "2026-10-18T10:42:14.555602",
+      "target_file": null,
+      "target_range": null,
+      "codebase_context": null
+    },
+    {
+      "id": "3bef4d89",
+      "parent_id": "f085f608",
+      "children_ids": [],
+      "code_snapshot": "def f(): pass",
+      "context_summary": "Task: write a binary search\nApproach: a synthesized approach 1\n---\nTask: add a docstring\nApproach: a synthesized approach 5",
+      "user_preferences": [],
+      "score": null,
+      "score_source": null,
+      "status": "active",
+      "query_history": [],
+      "branch_label": "Branch A",
+      "created_at": "2026-10-18T10:42:14.748399",
+      "target_file": null,
+      "target_range": null,
+      "codebase_context": null
+    }
+  ]
+}

@@ -59,7 +59,41 @@ button:disabled { cursor: not-allowed; }
   background: var(--paper);
 }
 .main { flex: 1; display: flex; min-height: 0; }
+.node-count-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 20px;
+  background: var(--amber-wash);
+  color: var(--amber-text);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--amber);
+}
+.node-count-toast button {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--amber);
+  background: transparent;
+  color: var(--amber-text);
+  white-space: nowrap;
+}
+.node-count-toast button:hover { background: var(--amber); color: var(--paper); }
 .canvas { flex: 1; position: relative; background: var(--paper); }
+.canvas-empty-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  padding: 24px;
+}
+.canvas-empty-title { font-family: var(--font-sans); font-size: 14px; font-weight: 600; color: var(--ink); margin: 0; }
+.canvas-empty-state p:not(.canvas-empty-title) { margin: 0; font-size: 13px; }
 .tree-canvas-wrapper { position: absolute; inset: 0; }
 
 /* ---------- Status bar (masthead) ---------- */
@@ -233,6 +267,26 @@ button:disabled { cursor: not-allowed; }
   color: var(--ink-dim);
 }
 .query-actions button:hover { background: var(--panel); color: var(--ink); }
+.merge-siblings-row { display: flex; gap: 8px; align-items: center; }
+.merge-siblings-row select {
+  flex: 1;
+  font-size: 12px;
+  padding: 5px 6px;
+  border-radius: var(--radius);
+  border: 1px solid var(--rule-soft);
+  background: var(--paper-2);
+  color: var(--ink);
+}
+.merge-siblings-row button {
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--indigo);
+  background: var(--indigo-wash);
+  color: var(--indigo-ink);
+  white-space: nowrap;
+}
+.merge-siblings-row button:disabled { opacity: 0.4; cursor: not-allowed; }
 .conflict-banner {
   margin-top: 10px;
   border: 1px solid var(--rose);
@@ -272,6 +326,22 @@ button:disabled { cursor: not-allowed; }
   font-weight: 600;
 }
 .inspector ul { margin: 0; padding-left: 18px; color: var(--ink-dim); }
+/* 2026-10-17: just the latest answer, isolated from the full accumulated
+   Task/Approach history under "Context" below -- prose, not a code-styled
+   <pre>, since this is meant to be read, not inspected. */
+.node-answer {
+  margin: 0;
+  background: var(--indigo-wash);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .inspector pre {
   white-space: pre-wrap;
   word-break: break-word;
@@ -400,7 +470,7 @@ button:disabled { cursor: not-allowed; }
 /* ---------- Prompt bar ---------- */
 .prompt-bar {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 10px;
   padding: 14px 24px;
   background: var(--paper);
@@ -408,6 +478,11 @@ button:disabled { cursor: not-allowed; }
   position: relative;
   z-index: 5;
 }
+.prompt-bar-row { display: flex; align-items: center; gap: 10px; }
+.prompt-bar-row-controls { justify-content: space-between; flex-wrap: wrap; }
+.prompt-bar-controls-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.prompt-bar-controls-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.prompt-bar-row-status { gap: 12px; }
 .prompt-bar-field {
   flex: 1;
   display: flex;
@@ -437,18 +512,32 @@ button:disabled { cursor: not-allowed; }
 .prompt-bar input::placeholder { color: var(--ink-faint); }
 .prompt-bar-spacer { flex: none; width: 1px; align-self: stretch; background: var(--rule-soft); margin: 0 2px; }
 
-/* Phase 5.6: intent toggle + active-file indicator */
-.intent-toggle { display: flex; gap: 2px; border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 2px; }
+/* Phase 5.6: intent toggle + active-file indicator.
+   2026-10-17 polish: more internal gap/padding and a subtle track
+   background so the three options read as one grouped control at a
+   glance, instead of three tight buttons that blur together. */
+.intent-toggle {
+  display: flex;
+  gap: 3px;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  padding: 3px;
+  background: var(--panel);
+}
 .intent-option {
   font-family: var(--font-sans);
-  font-size: 10.5px;
-  padding: 4px 10px;
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  padding: 6px 13px;
   border: none;
   border-radius: var(--radius);
   background: transparent;
   color: var(--ink-faint);
+  white-space: nowrap;
+  transition: background 0.1s ease, color 0.1s ease;
 }
-.intent-option.on { background: var(--indigo-wash); color: var(--indigo-ink); }
+.intent-option:not(:disabled):hover { color: var(--ink); }
+.intent-option.on { background: var(--indigo-wash); color: var(--indigo-ink); font-weight: 600; }
 .intent-option:disabled { opacity: 0.4; cursor: not-allowed; }
 .active-file-indicator {
   font-family: var(--font-mono);
@@ -501,8 +590,15 @@ button:disabled { cursor: not-allowed; }
 
 .bo-node {
   position: relative;
-  min-width: 150px;
-  max-width: 210px;
+  /* 2026-10-17 fix: was min/max-width (150-210px, content-dependent). React
+     Flow positions nodes by their top-left corner, and the connector
+     handles are centered on the actual rendered width -- so two nodes
+     sharing the same computed x (e.g. a parent centered exactly over its
+     one child, per layout()'s math) still visually slanted whenever their
+     rendered widths differed. A fixed width makes the layout's x-centering
+     math match the real on-screen center, so a single-child chain draws a
+     straight vertical line as expected. */
+  width: 190px;
   padding: 10px 13px;
   text-align: left;
   background: var(--paper-2);

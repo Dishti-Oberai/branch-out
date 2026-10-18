@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from branch_generator import branch_label, generate_branches
-from codebase_graph import codebase_context_for_prompt
+from codebase_graph import codebase_context_for_prompt, list_known_files, match_known_file
 from context_retriever import get_relevant_context
 from git_engine import make_patch, merge_code
 from models import DEFAULT_BEAM_WIDTH, Branch, PatchOutcome, QueryEntry, TreeNode
@@ -33,6 +33,54 @@ def _resolve_target(
     if intent == "code_change":
         return target_file, target_range
     return (target_file, target_range) if branch.is_code_change else (None, None)
+
+
+async def _maybe_redirect_target(
+    llm_client,
+    prompt: str,
+    context_summary: str,
+    user_preferences: List[str],
+    codebase_context_full: Optional[str],
+    candidate_target_file: Optional[str],
+    include_codebase: bool,
+    intent: str,
+    branch: Branch,
+) -> Tuple[Branch, Optional[str]]:
+    """Phase 7 (2026-10-17): if the model declared a `target_file` different
+    from the one it was actually shown content for, `branch.code` is
+    untrusted for that file -- unseen content, same rule everywhere else in
+    this codebase. Fires exactly one retry, re-scoped to the declared file,
+    and returns `(that response, the matched file)` instead. Returns the
+    original branch and `None` (no redirect) when there's nothing to
+    redirect, or when the declared file isn't a real, known one
+    (hallucinated path) -- conservative by default.
+    """
+    if not branch.target_file or not codebase_context_full or not include_codebase:
+        return branch, None
+    if not candidate_target_file:
+        # No target_file was given at all -> codebase_context_for_prompt
+        # never scopes down without one, so the model already saw the
+        # FULL, unscoped snapshot (see its own docstring). Nothing was
+        # hidden from it, so there's nothing to redirect to -- a retry
+        # here would only narrow the context below what it already had.
+        # Real bug, caught by code review (2026-10-17): this case used to
+        # fall through to a retry whenever the model filled in a
+        # `target_file` anyway (the prompt always asks for the field),
+        # degrading a correctly-grounded answer into one scoped to a
+        # single file, plus an unnecessary extra LLM call.
+        return branch, None
+    known = list_known_files(codebase_context_full)
+    matched = match_known_file(branch.target_file, known)
+    if matched is None:
+        return branch, None  # hallucinated path -- don't trust it
+    if match_known_file(candidate_target_file, known) == matched:
+        return branch, None  # declared the same file it was already given -- no redirect
+    retried = await generate_branches(
+        prompt, context_summary, user_preferences, llm_client, beam_width=1,
+        codebase_context=codebase_context_for_prompt(codebase_context_full, matched, include_codebase),
+        intent=intent,
+    )
+    return (retried[0], matched) if retried else (branch, None)
 
 
 class LLMGenerationFailed(RuntimeError):
@@ -118,7 +166,13 @@ class Orchestrator:
         async def on_result(i: int, b: Optional[Branch]) -> None:
             if b is None:
                 return  # that call failed; already logged in branch_generator
-            node_target_file, node_target_range = _resolve_target(intent, target_file, target_range, b)
+            b, redirected_to = await _maybe_redirect_target(
+                self.llm, prompt, parent.context_summary, parent.user_preferences,
+                parent.codebase_context, target_file, include_codebase, intent, b,
+            )
+            effective_target_file = redirected_to or target_file
+            effective_target_range = None if redirected_to else target_range
+            node_target_file, node_target_range = _resolve_target(intent, effective_target_file, effective_target_range, b)
             node = TreeNode(
                 id=self.tree.new_id(),
                 parent_id=parent.id,
@@ -195,7 +249,13 @@ class Orchestrator:
         if not branches:
             raise LLMGenerationFailed(f"LLM failed to generate a continuation for node {node_id}")
         branch = branches[0]
-        node_target_file, node_target_range = _resolve_target(intent, target_file, target_range, branch)
+        branch, redirected_to = await _maybe_redirect_target(
+            self.llm, prompt, parent.context_summary, parent.user_preferences,
+            parent.codebase_context, target_file, include_codebase, intent, branch,
+        )
+        effective_target_file = redirected_to or target_file
+        effective_target_range = None if redirected_to else target_range
+        node_target_file, node_target_range = _resolve_target(intent, effective_target_file, effective_target_range, branch)
         node = TreeNode(
             id=self.tree.new_id(),
             parent_id=parent.id,
@@ -482,6 +542,78 @@ class Orchestrator:
         self.tree.add_node(node)
         self._activate_unlocked(node.id)
         return PatchOutcome(conflict=False, node=self.tree.get_node(node.id), diff_preview=None)
+
+    async def merge_siblings(self, node_a_id: str, node_b_id: str) -> TreeNode:
+        """Phase 6.2: combine two sibling branches (two children of the same
+        parent, typically from the same `/branch` fan-out) into one new
+        node that synthesizes both approaches.
+
+        Deliberately distinct from `patch()`/`merge()` above (Option A/C,
+        both ancestor-descendant relationships with an existing conflict-
+        detection or preference-extraction story) -- two siblings have no
+        shared downstream history and no git-mergeable relationship to each
+        other (they're independent attempts at the same prompt, not a base
+        and a revision of it), so there's nothing for `git_engine.merge_code`
+        to meaningfully diff. This is "LLM context synthesis" (the shape
+        CLAUDE.md's deferred scope note already named): one call sees both
+        branches' code and reasoning side by side and produces a single,
+        coherent solution that combines what's good about each -- not a
+        mechanical text merge.
+
+        Always creates a new child of the shared parent (never of either
+        sibling) and activates it, the same "new node, new active cursor"
+        pattern every other merge/patch/continue call in this file uses.
+        """
+        async with self._lock:
+            return await self._merge_siblings_unlocked(node_a_id, node_b_id)
+
+    async def _merge_siblings_unlocked(self, node_a_id: str, node_b_id: str) -> TreeNode:
+        a = self.tree.get_node(node_a_id)  # raises KeyError -> 404 if unknown
+        b = self.tree.get_node(node_b_id)
+        if node_a_id == node_b_id:
+            raise ValueError("Cannot merge a node with itself")
+        if a.parent_id is None or a.parent_id != b.parent_id:
+            raise ValueError(f"{node_a_id} and {node_b_id} are not siblings (same parent required)")
+        parent = self.tree.get_node(a.parent_id)
+
+        prompt = (
+            "Two alternative solutions were generated for the same task. "
+            "Synthesize ONE combined solution that takes the best aspects of "
+            "both -- do not just pick one; genuinely combine their strengths.\n\n"
+            f"Approach A ({a.branch_label}):\n{a.code_snapshot}\n\n"
+            f"Approach B ({b.branch_label}):\n{b.code_snapshot}"
+        )
+        branches = await generate_branches(
+            prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width=1,
+            codebase_context=codebase_context_for_prompt(parent.codebase_context, parent.target_file, True),
+        )
+        if not branches:
+            raise LLMGenerationFailed(f"LLM failed to synthesize a merge of {node_a_id} and {node_b_id}")
+        synthesized = branches[0]
+
+        node = TreeNode(
+            id=self.tree.new_id(),
+            parent_id=parent.id,
+            children_ids=[],
+            code_snapshot=synthesized.code,
+            context_summary=_extend_summary(
+                parent.context_summary,
+                f"Merge of sibling branches {a.branch_label} and {b.branch_label}",
+                synthesized.reasoning,
+            ),
+            user_preferences=list(parent.user_preferences),
+            score=None,
+            score_source=None,
+            status="normal",
+            query_history=[],
+            branch_label=f"Branch {branch_label(len(parent.children_ids))}",
+            target_file=parent.target_file,
+            target_range=parent.target_range,
+            codebase_context=parent.codebase_context,
+        )
+        self.tree.add_node(node)
+        self._activate_unlocked(node.id)
+        return self.tree.get_node(node.id)
 
     async def backtrack(self, node_id: str) -> TreeNode:
         """Move the active cursor to any node.

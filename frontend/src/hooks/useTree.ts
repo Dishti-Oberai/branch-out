@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Intent, PatchOutcome, QueryEntry, TargetRange, TreeNode } from "../types";
 import { type ActiveEditorContext, useTreeWebSocket, type BranchOutEvent } from "./useWebSocket";
 
-const API = "http://localhost:8000";
+// Phase 6.2: overridable via VITE_API_URL so Playwright's E2E suite can
+// point at a separate, FakeLLM-backed server on its own port instead of
+// ever touching the real backend a manual testing session might have
+// running on :8000. Defaults to :8000 for every normal use (dev, the
+// VS Code webview's build, etc.) -- unset for all of those.
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 async function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(API + path, {
@@ -20,6 +25,12 @@ export function useTree() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 2026-10-17 (Phase 1 empty-state leftover): true until the first
+  // /session fetch settles (success or failure) -- lets the UI tell
+  // "still loading" apart from "loaded, and there really are zero nodes
+  // / the backend is unreachable", instead of both looking like a blank
+  // canvas with no feedback.
+  const [loading, setLoading] = useState(true);
   // Step 2.4: node ids whose score is still being evaluated in the
   // background (from branch.ready until score.ready arrives), so the UI
   // can show "evaluating…" rather than a bare "not scored" that looks
@@ -69,7 +80,9 @@ export function useTree() {
   }, [refresh]);
 
   useEffect(() => {
-    refresh().catch(() => setError("Backend not reachable on :8000"));
+    refresh()
+      .catch(() => setError("Backend not reachable on :8000"))
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   // Initial fetch — the WebSocket only delivers updates going forward;
@@ -114,6 +127,7 @@ export function useTree() {
 
   return {
     nodes,
+    loading,
     pendingScoreIds,
     active,
     selectedId,
@@ -189,6 +203,13 @@ export function useTree() {
     merge: (sourceNodeId: string, currentNodeId: string) =>
       run((signal) => post<{ outcome: PatchOutcome }>("/merge", {
         source_node_id: sourceNodeId, current_node_id: currentNodeId,
+      }, signal)),
+    // Phase 6.2: combine two sibling branches (same parent) into one new
+    // node via LLM synthesis — distinct from merge()/patch() above, which
+    // both act on an ancestor-descendant pair, not two independent siblings.
+    mergeSiblings: (nodeAId: string, nodeBId: string) =>
+      run((signal) => post<{ node: TreeNode }>("/merge-siblings", {
+        node_a_id: nodeAId, node_b_id: nodeBId,
       }, signal)),
     save: () => run(() => post("/session/save", {})),
     load: (path: string) => run(async () => { await post("/session/load", { path }); }),

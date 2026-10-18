@@ -175,6 +175,23 @@ def _match_target_relpath(target_file: str, known: Iterable[str]) -> Optional[st
     )
 
 
+def list_known_files(snapshot: str) -> List[str]:
+    """Phase 7: the cheap, names-only manifest of every file in `snapshot` --
+    no content, just paths, so a prompt can tell the model what else exists
+    without the token cost of showing it.
+    """
+    return sorted(parse_snapshot_chunks(snapshot))
+
+
+def match_known_file(candidate: str, known: Iterable[str]) -> Optional[str]:
+    """Phase 7: public wrapper around the same path-boundary matching
+    `select_relevant_subset` uses for `target_file` internally -- lets the
+    orchestrator check whether a model-declared `target_file` is a real,
+    known file (vs. a hallucinated path) before trusting a redirect.
+    """
+    return _match_target_relpath(candidate, known)
+
+
 def select_relevant_subset(snapshot: str, target_file: str, depth: int = 1) -> Optional[str]:
     """Returns a snapshot containing only `target_file` and its import-graph
     neighbors out to `depth` hops, in the same chunk format as the input --
@@ -231,10 +248,28 @@ def codebase_context_for_prompt(
       import-graph neighbors). Fails open to the full snapshot if
       `target_file` isn't found in it (outside the workspace, excluded as
       binary/oversized, etc.) rather than silently sending nothing.
+
+    Phase 7 addition (2026-10-17): when scoping down to a subset, also
+    prepends a names-only manifest of whatever got left out -- the model
+    can't see those files' content, but it now knows they *exist*, so it
+    can correctly say "actually, this is about util.py" instead of either
+    silently failing or hallucinating content for a file it never saw.
+    `Branch.target_file` + `Orchestrator._maybe_redirect_target` decide
+    what happens with that signal.
     """
     if not include_codebase:
         return None
     if not codebase_context or not target_file:
         return codebase_context
     scoped = select_relevant_subset(codebase_context, target_file, depth=CODEBASE_GRAPH_DEPTH)
-    return scoped if scoped is not None else codebase_context
+    if scoped is None:
+        return codebase_context
+    shown = set(parse_snapshot_chunks(scoped))
+    others = [p for p in list_known_files(codebase_context) if p not in shown]
+    if not others:
+        return scoped
+    manifest = (
+        "Other files that exist in this codebase (names only, not shown "
+        "below): " + ", ".join(others) + "\n\n"
+    )
+    return manifest + scoped

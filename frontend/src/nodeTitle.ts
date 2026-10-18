@@ -33,3 +33,17 @@ export function deriveNodeTitle(node: TreeNode): string | null {
   const short = words.slice(0, 6).join(" ");
   return short.length < firstSentence.length || words.length > 6 ? `${short}…` : short;
 }
+
+// 2026-10-17: a dedicated "just the answer" section for a node's response,
+// separate from "Context" (the full accumulated Task/Approach history,
+// which gets long and noisy across many turns). Same extraction as
+// deriveNodeTitle's marker-finding above, but returns the full text
+// instead of a truncated title.
+export function deriveLatestAnswer(node: TreeNode): string | null {
+  if (!node.context_summary) return null;
+  const marker = "\nApproach: ";
+  const idx = node.context_summary.lastIndexOf(marker);
+  if (idx === -1) return null;
+  const text = node.context_summary.slice(idx + marker.length).trim();
+  return text || null;
+}

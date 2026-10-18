@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import NodeInspector from "./components/NodeInspector";
 import StatusBar from "./components/StatusBar";
 import TreeCanvas from "./components/TreeCanvas";
@@ -27,6 +27,14 @@ export default function App() {
   // already been unreliable elsewhere in this app (see the Explore-
   // alternatives fix) — a transient inline message instead.
   const [applyStatus, setApplyStatus] = useState<string | null>(null);
+  // Phase 6.2: a soft, dismissible warning once the tree crosses 50 nodes
+  // (ROADMAP 6.2's risk-register item — large sessions were never load-
+  // tested). Not a hard limit: nothing is disabled, this is purely
+  // informational. `nodeCountWarningDismissed` persists the dismissal for
+  // the rest of this session so it doesn't reappear on every re-render
+  // once acknowledged, but resets on reload (deliberately not stored
+  // anywhere durable — it's a one-time nudge, not a setting).
+  const [nodeCountWarningDismissed, setNodeCountWarningDismissed] = useState(false);
   const { branch } = tree;
 
   // Orphaned nodes revive on click (backtrack there); everything else just opens the inspector.
@@ -75,17 +83,68 @@ export default function App() {
     setPrompt("");
   };
 
+  // Phase 6.2: keyboard shortcuts. Cmd/Ctrl+B and Cmd/Ctrl+Z are only
+  // handled OUTSIDE text inputs/textareas/selects — those are exactly the
+  // elements where a user legitimately expects normal browser undo/typing
+  // behavior (Cmd+Z undoing a keystroke, Cmd+B doing nothing special but
+  // still shouldn't be hijacked mid-edit). Esc is always safe to handle
+  // globally — closing the inspector is the same "escape a context" idiom
+  // Esc already has everywhere else.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isFormField = !!target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+      if (e.key === "Escape") {
+        tree.select(null);
+        return;
+      }
+      if (isFormField || !(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "b" || e.key === "B") {
+        e.preventDefault();
+        submitBranch();
+      } else if (e.key === "z" || e.key === "Z") {
+        e.preventDefault();
+        const current = from;
+        if (current?.parent_id) tree.backtrack(current.parent_id);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, prompt]);
+
   return (
     <div className="app">
+      {tree.nodes.length > 50 && !nodeCountWarningDismissed && (
+        <div className="node-count-toast">
+          <span>⚠ This tree has {tree.nodes.length} nodes — large sessions haven't been load-tested.</span>
+          <button type="button" onClick={() => setNodeCountWarningDismissed(true)}>Dismiss</button>
+        </div>
+      )}
       <StatusBar nodes={tree.nodes} active={tree.active} />
       <div className="main">
         <div className="canvas">
-          <TreeCanvas
-            nodes={tree.nodes}
-            pendingScoreIds={tree.pendingScoreIds}
-            onSelect={select}
-            onExplore={explore}
-          />
+          {tree.loading ? (
+            <div className="canvas-empty-state">
+              <p>Loading your tree…</p>
+            </div>
+          ) : tree.nodes.length === 0 ? (
+            <div className="canvas-empty-state">
+              <p className="canvas-empty-title">
+                {tree.error ? "Can't reach the backend" : "Nothing here yet"}
+              </p>
+              <p className="muted">
+                {tree.error ?? "Type a prompt below to start the tree."}
+              </p>
+            </div>
+          ) : (
+            <TreeCanvas
+              nodes={tree.nodes}
+              pendingScoreIds={tree.pendingScoreIds}
+              onSelect={select}
+              onExplore={explore}
+            />
+          )}
         </div>
         {tree.selected && (
           <NodeInspector
@@ -102,6 +161,7 @@ export default function App() {
             onPatch={(sourceNodeId, queryId, targetNodeId, force) =>
               tree.patch(sourceNodeId, queryId, targetNodeId, force)}
             onMerge={(sourceNodeId, currentNodeId) => tree.merge(sourceNodeId, currentNodeId)}
+            onMergeSiblings={(nodeAId, nodeBId) => tree.mergeSiblings(nodeAId, nodeBId)}
             onApplyToFile={async () => {
               setApplyStatus(null);
               try {
@@ -118,73 +178,85 @@ export default function App() {
         className="prompt-bar"
         onSubmit={(e) => { e.preventDefault(); submit(); }}
       >
-        <div className="prompt-bar-field">
-          <span className="prompt-bar-hint">from {from?.branch_label ?? "Root"}</span>
-          <input
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Ask for one answer, or explore 3 approaches at once →"
-            disabled={tree.busy}
-          />
+        <div className="prompt-bar-row prompt-bar-row-input">
+          <div className="prompt-bar-field">
+            <span className="prompt-bar-hint">from {from?.branch_label ?? "Root"}</span>
+            <input
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Ask for one answer, or explore 3 approaches at once →"
+              disabled={tree.busy}
+            />
+          </div>
         </div>
-        <div className="intent-toggle">
-          <button
-            type="button"
-            className={`intent-option${intent === "auto" ? " on" : ""}`}
-            title="Branch-Out decides based on the model's own classification"
-            onClick={() => setIntent("auto")}
-          >
-            Auto
-          </button>
-          <button
-            type="button"
-            className={`intent-option${intent === "question" ? " on" : ""}`}
-            title="Always answer in the tree, never touch a file, regardless of what the model thinks"
-            onClick={() => setIntent("question")}
-          >
-            Question
-          </button>
-          <button
-            type="button"
-            className={`intent-option${intent === "code_change" ? " on" : ""}`}
-            disabled={!activeFile}
-            title={activeFile ? "Always apply to the active file, regardless of what the model thinks" : "No active file reported by VS Code yet"}
-            onClick={() => setIntent("code_change")}
-          >
-            Code change
-          </button>
+        <div className="prompt-bar-row prompt-bar-row-controls">
+          <div className="prompt-bar-controls-left">
+            <div className="intent-toggle">
+              <button
+                type="button"
+                className={`intent-option${intent === "auto" ? " on" : ""}`}
+                title="Branch-Out decides based on the model's own classification"
+                onClick={() => setIntent("auto")}
+              >
+                Auto
+              </button>
+              <button
+                type="button"
+                className={`intent-option${intent === "question" ? " on" : ""}`}
+                title="Always answer in the tree, never touch a file, regardless of what the model thinks"
+                onClick={() => setIntent("question")}
+              >
+                Question
+              </button>
+              <button
+                type="button"
+                className={`intent-option${intent === "code_change" ? " on" : ""}`}
+                disabled={!activeFile}
+                title={activeFile ? "Always apply to the active file, regardless of what the model thinks" : "No active file reported by VS Code yet"}
+                onClick={() => setIntent("code_change")}
+              >
+                Code change
+              </button>
+            </div>
+            <span className="active-file-indicator">
+              {activeFile
+                ? `📄 ${activeFile.file.split("/").pop()}${targetRange ? ` lines ${targetRange.start_line}–${targetRange.end_line}` : ""}`
+                : "No active file"}
+            </span>
+          </div>
+          <div className="prompt-bar-controls-right">
+            <button className="btn btn-primary" disabled={tree.busy || !prompt.trim()}>
+              {tree.busy ? "Working…" : "Ask"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-accent"
+              disabled={tree.busy || !prompt.trim()}
+              onClick={submitBranch}
+            >
+              Explore 3 approaches
+            </button>
+            {tree.busy && <button type="button" className="btn btn-ghost" onClick={tree.cancel}>Cancel</button>}
+            <div className="prompt-bar-spacer" />
+            <button type="button" className="btn btn-ghost" onClick={tree.save} disabled={tree.busy}>
+              Save
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={tree.busy}
+              onClick={() => tree.load(DEFAULT_SESSION_PATH)}
+            >
+              Load
+            </button>
+          </div>
         </div>
-        <span className="active-file-indicator">
-          {activeFile
-            ? `📄 ${activeFile.file.split("/").pop()}${targetRange ? ` lines ${targetRange.start_line}–${targetRange.end_line}` : ""}`
-            : "No active file"}
-        </span>
-        <button className="btn btn-primary" disabled={tree.busy || !prompt.trim()}>
-          {tree.busy ? "Working…" : "Ask"}
-        </button>
-        <button
-          type="button"
-          className="btn btn-accent"
-          disabled={tree.busy || !prompt.trim()}
-          onClick={submitBranch}
-        >
-          Explore 3 approaches
-        </button>
-        {tree.busy && <button type="button" className="btn btn-ghost" onClick={tree.cancel}>Cancel</button>}
-        <div className="prompt-bar-spacer" />
-        <button type="button" className="btn btn-ghost" onClick={tree.save} disabled={tree.busy}>
-          Save
-        </button>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          disabled={tree.busy}
-          onClick={() => tree.load(DEFAULT_SESSION_PATH)}
-        >
-          Load
-        </button>
-        {tree.error && <span className="error">{tree.error}</span>}
-        {applyStatus && <span className="apply-status">{applyStatus}</span>}
+        {(tree.error || applyStatus) && (
+          <div className="prompt-bar-row prompt-bar-row-status">
+            {tree.error && <span className="error">{tree.error}</span>}
+            {applyStatus && <span className="apply-status">{applyStatus}</span>}
+          </div>
+        )}
       </form>
     </div>
   );

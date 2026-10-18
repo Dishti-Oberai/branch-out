@@ -226,7 +226,8 @@ Never let the project go dark — it should be runnable at every phase boundary.
 
 **Explicitly deferred to future scope only:**
 - Model-agnostic benchmarking (swap `ClaudeClient` for GPT-4 implementation)
-- Branch merge (git merge + LLM context synthesis) — designed and documented but not built until Phase 6 polish
+
+**Decision on record (2026-10-18): branch merge is no longer deferred.** Built in Phase 6.2 as `Orchestrator.merge_siblings` — LLM context synthesis of two sibling branches (same parent) into one new node, not a git merge (two independent attempts at the same prompt have no shared history for `git_engine` to diff against). See ROADMAP.md's Phase 6.2.
 
 **Decision on record (2026-09-26): VS Code / IDE extension is no longer out of scope.** It was on this list; the user explicitly asked for it (Branch-Out driven from inside the IDE, Copilot-like, applying chosen branches to real files) and it's now a real, scheduled phase — see ROADMAP.md's Phase 3. Removing it from "do not build" here rather than leaving a stale rule that contradicts a phase that actually exists in the roadmap.
 

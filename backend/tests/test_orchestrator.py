@@ -147,6 +147,73 @@ def test_branch_with_target_file_scopes_every_parallel_call():
         assert "utils.py" in call["system"]
 
 
+def test_continue_from_redirects_to_model_declared_target_file_when_known():
+    # Phase 7 (2026-10-17): main.py and unrelated.py aren't import-linked,
+    # so scoping to main.py hides unrelated.py's content -- but the model
+    # still knows it EXISTS (the manifest), and can correctly say the real
+    # target is unrelated.py. The first call's "code" must not be trusted
+    # for unrelated.py (never shown), so a safe retry, re-scoped to it,
+    # fires and its response is what the node actually gets.
+    responses = [
+        json.dumps({
+            "code": "untrusted", "reasoning": "r", "is_code_change": True, "target_file": "unrelated.py",
+        }),
+        json.dumps({"code": "REDIRECTED_CODE", "reasoning": "redirected", "is_code_change": True}),
+    ]
+    llm = FakeLLM(response_fn=lambda i: responses[i])
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.target_file == "unrelated.py"
+    assert node.code_snapshot == "REDIRECTED_CODE"
+    assert len(llm.received) == 2
+    assert "SECRET_UNRELATED_MARKER" in llm.received[1]["system"]  # retry actually saw it
+    assert node.target_range is None  # the original range was for main.py, doesn't carry over
+
+
+def test_continue_from_ignores_a_hallucinated_target_file():
+    # Declares a path that doesn't exist anywhere in the snapshot -- never
+    # trust it, same conservative-by-default rule as everywhere else.
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "x", "reasoning": "r", "is_code_change": True, "target_file": "ghost.py",
+    }))
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.target_file == "main.py"
+    assert len(llm.received) == 1  # no retry fired
+
+
+def test_continue_from_no_redirect_when_model_declares_the_same_file_it_was_given():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "x", "reasoning": "r", "is_code_change": True, "target_file": "main.py",
+    }))
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.target_file == "main.py"
+    assert len(llm.received) == 1
+
+
+def test_continue_from_no_redirect_when_no_target_file_was_given_at_all():
+    # Bug found by code review (2026-10-17): no target_file -> the model
+    # already sees the FULL unscoped snapshot (nothing was hidden from
+    # it), but the prompt still asks for "target_file" every time, so the
+    # model may fill it in anyway. That must never trigger a retry -- a
+    # retry would only narrow the context below what it already had and
+    # waste an LLM call for nothing.
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "x", "reasoning": "r", "is_code_change": True, "target_file": "unrelated.py",
+    }))
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", include_codebase=True))  # no target_file
+    assert node.target_file is None  # auto intent, is_code_change=True but no candidate to keep
+    assert node.code_snapshot == "x"  # the ONLY call's response, unmodified
+    assert len(llm.received) == 1  # no retry fired
+    assert "SECRET_UNRELATED_MARKER" in llm.received[0]["system"]  # already had the full snapshot
+
+
 def test_node_still_inherits_the_full_unscoped_snapshot_even_when_the_prompt_was_scoped():
     # The graph-scoped subset only affects what one call's prompt sees --
     # the node's own codebase_context (what children inherit) stays the
@@ -498,6 +565,28 @@ def test_patch_applies_cleanly_and_creates_a_new_active_child():
     assert o.tree.active_id == outcome.node.id
 
 
+def test_patch_works_when_source_and_target_are_the_same_node():
+    # Real bug, found via manual testing (2026-10-18): the frontend used to
+    # hide "Apply to current" entirely whenever you queried the ACTIVE
+    # node about itself (source_node_id == target_node_id), assuming it
+    # was meaningless. It isn't -- the diff is computed against the same
+    # base code either way, so it always applies cleanly, producing
+    # exactly "revise this node with the clarification" as a new child.
+    # No backend special-casing needed; this just confirms that's true.
+    llm = FakeLLM(response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "applied it"}')
+    o = Orchestrator(llm)
+    _add_node(o, "active", "root", code_snapshot="line1\nline2\n")
+    _add_query(o, "active", "what should line2 be?", "it should say CHANGED")
+
+    outcome = asyncio.run(o.patch("active", "q1", "active"))
+
+    assert outcome.conflict is False
+    assert outcome.node is not None
+    assert outcome.node.code_snapshot == "line1\nCHANGED\n"
+    assert outcome.node.parent_id == "active"
+    assert o.tree.active_id == outcome.node.id
+
+
 def test_patch_conflict_creates_nothing_and_returns_diff_preview():
     llm = FakeLLM(response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "applied it"}')
     o = Orchestrator(llm)
@@ -609,6 +698,52 @@ def test_merge_preference_extraction_failure_still_proceeds_with_empty_list():
     outcome = asyncio.run(o.merge("source", "current"))
     assert outcome.conflict is False
     assert outcome.node.user_preferences == ["existing pref"]
+
+
+def test_merge_siblings_creates_a_new_child_of_the_shared_parent_and_activates_it():
+    llm = FakeLLM(response_fn=lambda i: '{"code": "combined", "reasoning": "took the best of both"}')
+    o = Orchestrator(llm)
+    _add_node(o, "a", "root", code_snapshot="approach a", branch_label="Branch A")
+    _add_node(o, "b", "root", code_snapshot="approach b", branch_label="Branch B")
+
+    node = asyncio.run(o.merge_siblings("a", "b"))
+
+    assert node.parent_id == "root"
+    assert node.code_snapshot == "combined"
+    assert o.tree.active_id == node.id
+    sent_prompt = llm.received[0]["messages"][0]["content"]
+    assert "approach a" in sent_prompt and "approach b" in sent_prompt
+
+
+def test_merge_siblings_rejects_nodes_with_different_parents():
+    o = Orchestrator(FakeLLM())
+    _add_node(o, "a", "root")
+    _add_node(o, "b", "a")  # b's parent is a, not root -- not a sibling of a
+    with pytest.raises(ValueError):
+        asyncio.run(o.merge_siblings("a", "b"))
+
+
+def test_merge_siblings_rejects_merging_a_node_with_itself():
+    o = Orchestrator(FakeLLM())
+    _add_node(o, "a", "root")
+    with pytest.raises(ValueError):
+        asyncio.run(o.merge_siblings("a", "a"))
+
+
+def test_merge_siblings_unknown_node_raises_key_error():
+    o = Orchestrator(FakeLLM())
+    _add_node(o, "a", "root")
+    with pytest.raises(KeyError):
+        asyncio.run(o.merge_siblings("a", "nope"))
+
+
+def test_merge_siblings_llm_failure_raises_generation_failed():
+    llm = FakeLLM(fail_on={0})
+    o = Orchestrator(llm)
+    _add_node(o, "a", "root")
+    _add_node(o, "b", "root")
+    with pytest.raises(LLMGenerationFailed):
+        asyncio.run(o.merge_siblings("a", "b"))
 
 
 def test_patch_force_applies_the_raw_clarified_code_despite_conflict():

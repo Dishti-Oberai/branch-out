@@ -1,6 +1,9 @@
 from codebase_context import gather_codebase_context
 from codebase_graph import (
     build_import_graph,
+    codebase_context_for_prompt,
+    list_known_files,
+    match_known_file,
     parse_snapshot_chunks,
     select_relevant_subset,
 )
@@ -141,3 +144,43 @@ def test_select_relevant_subset_output_is_valid_reparseable_snapshot_format():
     reparsed = parse_snapshot_chunks(subset)
     assert reparsed["a.py"] == "from b import x\n"
     assert reparsed["b.py"] == "y = 1\n"
+
+
+def test_list_known_files_returns_sorted_paths():
+    files = {"b.py": "1", "a.py": "2"}
+    assert list_known_files(make_snapshot(files)) == ["a.py", "b.py"]
+
+
+def test_match_known_file_resolves_absolute_and_relative_paths():
+    known = ["src/util.py", "src/other.py"]
+    assert match_known_file("/Users/me/project/src/util.py", known) == "src/util.py"
+    assert match_known_file("src/util.py", known) == "src/util.py"
+    assert match_known_file("does_not_exist.py", known) is None
+
+
+def test_codebase_context_for_prompt_adds_manifest_of_files_left_out_of_scope():
+    # Phase 7: constants.py and util.py don't import each other, so scoping
+    # to constants.py alone would otherwise make util.py invisible -- this
+    # is the exact real-world case that motivated the phase.
+    files = {
+        "constants.py": "MAX_RETRIES = 3\n",
+        "util.py": "def greet(name): return f'hi {name}'\n",
+    }
+    scoped = codebase_context_for_prompt(make_snapshot(files), "constants.py", True)
+    assert "constants.py" in scoped
+    assert "Other files that exist in this codebase" in scoped
+    assert "util.py" in scoped.split("\n\n", 1)[0]  # named in the manifest line
+    # but its real content isn't included below the manifest
+    assert "def greet" not in scoped
+
+
+def test_codebase_context_for_prompt_omits_manifest_when_nothing_is_left_out():
+    files = {"a.py": "from b import x\n", "b.py": "y = 1\n"}
+    scoped = codebase_context_for_prompt(make_snapshot(files), "a.py", True)
+    assert "Other files that exist in this codebase" not in scoped
+
+
+def test_codebase_context_for_prompt_omits_manifest_when_no_target_file():
+    files = {"a.py": "x = 1\n", "b.py": "y = 1\n"}
+    full = codebase_context_for_prompt(make_snapshot(files), None, True)
+    assert "Other files that exist in this codebase" not in full

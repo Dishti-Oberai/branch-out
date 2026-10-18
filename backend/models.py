@@ -80,6 +80,11 @@ class Branch:
     # the model doesn't return it or its output didn't parse at all; see
     # branch_generator._parse's own docstring for why that direction.
     is_code_change: bool = False
+    # Phase 7 addition (2026-10-17): which file (from the manifest in
+    # `codebase_context_for_prompt`) the model says this response actually
+    # concerns -- None means "the one it was shown", i.e. no redirect.
+    # Orchestrator._maybe_redirect_target decides whether to trust this.
+    target_file: Optional[str] = None
 
 
 def _iso(d: Dict[str, Any], key: str) -> None:
