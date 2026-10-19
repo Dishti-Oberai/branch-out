@@ -3,5 +3,5 @@ __pycache__/
 *.pyc
 node_modules/
 dist/
-sessions/*.json
+**/sessions/*.json
 .venv/
