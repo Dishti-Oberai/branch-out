@@ -240,6 +240,99 @@ def test_continue_from_no_redirect_when_model_declares_the_same_file_it_was_give
     assert len(llm.received) == 1
 
 
+def test_continue_from_trusts_additional_file_already_shown_in_scope():
+    # main.py (depth 1) already pulls in utils.py as a direct import
+    # neighbor -- the model genuinely saw it, so no verification call
+    # should fire for it.
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "primary code", "reasoning": "r", "is_code_change": True,
+        "additional_files": {"utils.py": "def helper():\n    return 1\n"},
+    }))
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.additional_edits == {"utils.py": "def helper():\n    return 1\n"}
+    assert len(llm.received) == 1  # no verification call needed
+
+
+def test_continue_from_verifies_additional_file_not_shown_in_scope():
+    # unrelated.py is NOT an import neighbor of main.py -- the model never
+    # saw it, so its claimed content must not be trusted directly; exactly
+    # one verification call, scoped to unrelated.py, must fire first.
+    responses = [
+        json.dumps({
+            "code": "primary code", "reasoning": "r", "is_code_change": True,
+            "additional_files": {"unrelated.py": "untrusted guess"},
+        }),
+        json.dumps({"code": "VERIFIED_UNRELATED_CONTENT", "reasoning": "verified"}),
+    ]
+    llm = FakeLLM(response_fn=lambda i: responses[i])
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.additional_edits == {"unrelated.py": "VERIFIED_UNRELATED_CONTENT"}
+    assert len(llm.received) == 2
+    assert "SECRET_UNRELATED_MARKER" in llm.received[1]["system"]  # the verification call actually saw it
+
+
+def test_continue_from_drops_additional_file_when_verification_fails():
+    llm = FakeLLM(
+        response_fn=lambda i: json.dumps({
+            "code": "primary code", "reasoning": "r", "is_code_change": True,
+            "additional_files": {"unrelated.py": "untrusted guess"},
+        }),
+        fail_on={1},
+    )
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.additional_edits == {}  # never falls back to the unverified guess
+
+
+def test_continue_from_drops_hallucinated_additional_file_path():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "primary code", "reasoning": "r", "is_code_change": True,
+        "additional_files": {"ghost.py": "made up content"},
+    }))
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.additional_edits == {}
+    assert len(llm.received) == 1  # no verification call for a path that doesn't exist
+
+
+def test_continue_from_caps_additional_files_at_the_max():
+    files = {"main.py": "", "utils.py": "", "unrelated.py": ""}
+    snapshot = "".join(f"--- {p} ---\n{c}\n\n" for p, c in files.items())
+    # 4 distinct declared files > _MAX_ADDITIONAL_FILES (3) -- the 4th must
+    # never even be considered, known or not.
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "primary", "reasoning": "r", "is_code_change": True,
+        "additional_files": {
+            "utils.py": "a", "unrelated.py": "b", "main.py": "c", "ghost4.py": "d",
+        },
+    }))
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", snapshot)
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert "ghost4.py" not in node.additional_edits
+    assert len(node.additional_edits) <= 3
+
+
+def test_continue_from_ignores_additional_files_when_not_a_code_change():
+    # A question (or any untrusted/non-code-change node) must never touch
+    # ANY file, primary or additional.
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "x", "reasoning": "r", "is_code_change": False,
+        "additional_files": {"utils.py": "should never be trusted"},
+    }))
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.target_file is None
+    assert node.additional_edits == {}
+
+
 def test_continue_from_no_redirect_when_no_target_file_was_given_at_all():
     # Bug found by code review (2026-10-17): no target_file -> the model
     # already sees the FULL unscoped snapshot (nothing was hidden from
@@ -546,6 +639,45 @@ def test_query_llm_failure_leaves_history_unchanged():
     with pytest.raises(LLMGenerationFailed):
         asyncio.run(o.query("root", "what is this?"))
     assert o.tree.get_node("root").query_history == []
+
+
+def test_query_extracts_actionable_true_from_structured_response():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "answer": "You should use a type hint here instead.", "actionable": True,
+    }))
+    o = Orchestrator(llm)
+    entry = asyncio.run(o.query("root", "should I change this?"))
+    assert entry.answer == "You should use a type hint here instead."
+    assert entry.actionable is True
+
+
+def test_query_extracts_actionable_false_from_structured_response():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "answer": "branchout-manual-test", "actionable": False,
+    }))
+    o = Orchestrator(llm)
+    entry = asyncio.run(o.query("root", "what is the app name"))
+    assert entry.answer == "branchout-manual-test"
+    assert entry.actionable is False
+
+
+def test_query_defaults_actionable_true_when_response_is_not_json():
+    # Real model quirk, same category as branch_generator's own fallback:
+    # plain prose with no JSON wrapper at all must still surface as a
+    # usable answer, not fail the turn -- and default to True (not False)
+    # since this is a UI-affordance decision, not a trust boundary.
+    llm = FakeLLM(response_fn=lambda i: "just a plain prose answer, no JSON")
+    o = Orchestrator(llm)
+    entry = asyncio.run(o.query("root", "what is this?"))
+    assert entry.answer == "just a plain prose answer, no JSON"
+    assert entry.actionable is True
+
+
+def test_query_defaults_actionable_true_when_field_missing():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({"answer": "an answer"}))
+    o = Orchestrator(llm)
+    entry = asyncio.run(o.query("root", "what is this?"))
+    assert entry.actionable is True
 
 
 def test_chained_query_includes_the_prior_qa_in_the_prompt():

@@ -14,6 +14,18 @@ class QueryEntry:
     answer: str
     timestamp: datetime
     chained_from: Optional[str] = None  # ID of prior QueryEntry this builds on
+    # Phase 9 (2026-10-19): real bug, reported by the user -- "Apply to
+    # current"/"Spawn branch from here" were shown for EVERY query entry
+    # unconditionally, even a purely factual one ("what is the app name")
+    # that has nothing meaningful to incorporate as a code change. The
+    # model now self-classifies whether its answer is an actual,
+    # actionable clarification (same pattern as Branch.is_code_change)
+    # vs. purely informational. Defaults True (not False, unlike
+    # is_code_change) -- this is a UI-affordance decision, not a trust
+    # boundary (clicking Apply still goes through real conflict
+    # detection before any file write), and True preserves today's
+    # existing behavior for old sessions saved before this field existed.
+    actionable: bool = True
 
 
 @dataclass
@@ -46,6 +58,17 @@ class TreeNode:
     # every node until a workspace is declared. See ROADMAP.md Phase 1's
     # "Amendment planned 2026-09-27" note for the full rationale.
     codebase_context: Optional[str] = None
+    # Phase 8 addition (2026-10-19): a request can need changes to files
+    # OTHER than the primary target_file (e.g. "change X in constants.py
+    # and Y in util.py") -- target_file/code_snapshot stay the node's
+    # single "primary" file exactly as before (every existing node, test,
+    # and UI path that only knows about one file keeps working
+    # unchanged); this holds any ADDITIONAL files touched in the same
+    # turn, keyed by their real path. Empty for the overwhelming majority
+    # of nodes (single-file requests). See orchestrator._resolve_
+    # additional_edits for how each entry's content gets verified before
+    # being trusted enough to land here.
+    additional_edits: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -85,6 +108,13 @@ class Branch:
     # concerns -- None means "the one it was shown", i.e. no redirect.
     # Orchestrator._maybe_redirect_target decides whether to trust this.
     target_file: Optional[str] = None
+    # Phase 8 addition (2026-10-19): any files OTHER than target_file the
+    # model says this response also touches, keyed by path, full new
+    # content as the value -- raw and unverified at this layer (parsing
+    # just extracts whatever the model claimed). Trust decisions belong to
+    # orchestrator._resolve_additional_edits, same separation of concerns
+    # Branch.target_file already has with _maybe_redirect_target.
+    additional_files: Dict[str, str] = field(default_factory=dict)
 
 
 def _iso(d: Dict[str, Any], key: str) -> None:

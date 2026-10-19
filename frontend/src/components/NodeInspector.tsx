@@ -211,7 +211,12 @@ export default function NodeInspector({
                 <li key={q.id} className="query-entry">
                   <p className="query-question">{q.question}</p>
                   <p className="query-answer">{q.answer}</p>
-                  {(canApplyToCurrent || canSpawnBranch) && (
+                  {!q.actionable && (
+                    <p className="muted query-not-actionable">
+                      Informational answer — nothing here to apply or merge into code.
+                    </p>
+                  )}
+                  {q.actionable && (canApplyToCurrent || canSpawnBranch) && (
                     <div className="query-actions">
                       {canApplyToCurrent && (
                         <button
@@ -267,11 +272,9 @@ export default function NodeInspector({
             </p>
           )}
           {hasSpawnedBranch && (
-            <p className="muted">
-              Already spawned a branch from this node this session — "Spawn branch from here" always does
-              the same thing regardless of which clarification you click it from (it folds in accumulated
-              preferences, not that specific answer), so repeat clicks just create near-duplicate branches.{" "}
-              <button type="button" className="icon-btn" onClick={() => setHasSpawnedBranch(false)}>
+            <p className="muted spawned-note">
+              Already spawned a branch this session.
+              <button type="button" className="link-btn" onClick={() => setHasSpawnedBranch(false)}>
                 Spawn another anyway
               </button>
             </p>
@@ -384,6 +387,17 @@ export default function NodeInspector({
               <pre>{node.code_snapshot || "—"}</pre>
             </div>
           )}
+          {Object.entries(node.additional_edits).map(([path, content]) => (
+            <div key={path}>
+              <h4 className="code-snapshot-heading">{path.split("/").pop()}</h4>
+              <div className="code-block">
+                <div className="code-block-bar">
+                  <span className="dot dot-red" /><span className="dot dot-amber" /><span className="dot dot-green" />
+                </div>
+                <pre>{content}</pre>
+              </div>
+            </div>
+          ))}
         </>
       )}
     </aside>

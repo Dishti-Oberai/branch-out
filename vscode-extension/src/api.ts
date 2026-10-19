@@ -38,6 +38,9 @@ export interface TreeNodeData {
   // Phase 1 amendment (2026-09-27): static codebase snapshot, inherited
   // parent->child. Only ever populated once `setWorkspace` has been called.
   codebase_context: string | null;
+  // Phase 8 (2026-10-19): any files OTHER than target_file this node also
+  // edits, keyed by path. Empty for the overwhelming majority of nodes.
+  additional_edits: Record<string, string>;
 }
 
 class ApiError extends Error {}

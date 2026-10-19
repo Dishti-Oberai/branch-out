@@ -50,6 +50,18 @@ body {
 button { font: inherit; cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 .muted { color: var(--ink-faint); }
+.spawned-note { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 6px 0; }
+.link-btn {
+  flex: none;
+  font-size: 10.5px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--rule-soft);
+  background: transparent;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.link-btn:hover { background: var(--panel); color: var(--ink); }
 
 /* ---------- App shell ---------- */
 .app {
@@ -251,6 +263,7 @@ button:disabled { cursor: not-allowed; }
   white-space: pre-wrap;
   margin: 0;
 }
+.query-not-actionable { font-size: 11px; margin: 4px 0 0; font-style: italic; }
 .query-form { display: flex; flex-direction: column; gap: 8px; }
 .query-form textarea { min-height: 64px; }
 .query-form button { align-self: flex-end; }

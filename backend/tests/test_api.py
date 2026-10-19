@@ -277,6 +277,29 @@ def test_apply_to_file_writes_code_snapshot(client, tmp_path):
     assert r.json()["path"] == str(written)
 
 
+def test_apply_to_file_also_writes_additional_edits(client, tmp_path):
+    # Phase 8 (2026-10-19): a /branch result (not yet auto-activated) can
+    # also carry additional_edits -- manually applying it via this
+    # endpoint must write those too, not just the primary target_file.
+    (tmp_path / "constants.py").write_text("MAX_RETRIES = 5\n")
+    (tmp_path / "util.py").write_text("from constants import MAX_RETRIES\n")
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "MAX_RETRIES = 7\n", "reasoning": "r", "is_code_change": True,
+        "additional_files": {"util.py": "from constants import MAX_RETRIES\nprint(MAX_RETRIES)\n"},
+    })))
+    client.post("/workspace", json={"root": str(tmp_path)})
+
+    branches = client.post("/branch", json={
+        "node_id": "root", "prompt": "change retries and add a print in util.py", "beam_width": 1,
+        "target_file": "constants.py",
+    }).json()["branches"]
+    assert (tmp_path / "util.py").read_text() == "from constants import MAX_RETRIES\n"  # not yet applied
+
+    client.post("/apply-to-file", json={"node_id": branches[0]["node_id"]})
+    assert (tmp_path / "constants.py").read_text() == "MAX_RETRIES = 7\n"
+    assert (tmp_path / "util.py").read_text() == "from constants import MAX_RETRIES\nprint(MAX_RETRIES)\n"
+
+
 def test_apply_to_file_with_target_range_splices_instead_of_overwriting(client, tmp_path):
     # Real bug (2026-09-27): a node created from a *selection* only ever
     # holds that selection's code — applying it as a full-file overwrite
@@ -772,6 +795,59 @@ def test_continue_with_target_file_writes_it_immediately_no_separate_apply(clien
     client.post("/continue", json={"node_id": "root", "prompt": "hi", "target_file": "out.py"})
     # No /apply-to-file call at all -- the file should already be there.
     assert (tmp_path / "out.py").read_text() == "written by continue\n"
+
+
+def test_continue_with_additional_files_writes_both_to_disk(client, tmp_path):
+    # Phase 8 (2026-10-19): the exact real-world scenario that motivated
+    # this phase -- a compound request needing two files changed in one
+    # turn, both actually written to disk, not just one.
+    (tmp_path / "constants.py").write_text("MAX_RETRIES = 5\n")
+    (tmp_path / "util.py").write_text("from constants import MAX_RETRIES\n")
+    # Order matters: /workspace gathers the codebase snapshot onto
+    # WHICHEVER orchestrator is live at that moment, so the FakeLLM swap
+    # must happen first, or the gather lands on an instance that then gets
+    # discarded -- same ordering the existing target_file-only tests
+    # above happened not to depend on, but this one needs the real
+    # codebase_context for additional_files resolution to work at all.
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "MAX_RETRIES = 7\n", "reasoning": "r", "is_code_change": True,
+        "additional_files": {"util.py": "from constants import MAX_RETRIES\nprint(MAX_RETRIES)\n"},
+    })))
+    client.post("/workspace", json={"root": str(tmp_path)})
+    client.post("/continue", json={
+        "node_id": "root", "prompt": "change retries and add a print in util.py",
+        "target_file": "constants.py",
+    })
+    assert (tmp_path / "constants.py").read_text() == "MAX_RETRIES = 7\n"
+    assert (tmp_path / "util.py").read_text() == "from constants import MAX_RETRIES\nprint(MAX_RETRIES)\n"
+
+
+def test_additional_file_conflict_does_not_block_the_primary_files_write(client, tmp_path):
+    # Fail-open rule extended to N files (Phase 8): a conflict syncing ONE
+    # additional file must never block the primary file (or any other
+    # additional file) from writing.
+    (tmp_path / "constants.py").write_text("MAX_RETRIES = 5\n")
+    (tmp_path / "util.py").write_text("from constants import MAX_RETRIES\n")
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "MAX_RETRIES = 7\n", "reasoning": "r", "is_code_change": True,
+        "additional_files": {"util.py": "from constants import MAX_RETRIES\nprint(MAX_RETRIES)\n"},
+    })))
+    client.post("/workspace", json={"root": str(tmp_path)})
+
+    node = client.post("/continue", json={
+        "node_id": "root", "prompt": "change retries and add a print in util.py",
+        "target_file": "constants.py",
+    }).json()["node"]
+    assert (tmp_path / "util.py").read_text() == "from constants import MAX_RETRIES\nprint(MAX_RETRIES)\n"
+
+    # An external edit to util.py that conflicts with what this node would
+    # write there next time it's re-activated (e.g. via backtrack).
+    (tmp_path / "util.py").write_text("SOMETHING COMPLETELY DIFFERENT, CONFLICTS\n")
+    r = client.post("/backtrack", json={"node_id": node["id"]})
+    assert r.status_code == 200  # activation itself always succeeds
+    # The conflicting additional file is left alone (fail-open: don't
+    # overwrite, don't block) -- but the PRIMARY file still gets its sync.
+    assert (tmp_path / "constants.py").read_text() == "MAX_RETRIES = 7\n"
 
 
 def test_backtrack_to_a_past_node_rewrites_the_file_to_match_it(client, tmp_path):

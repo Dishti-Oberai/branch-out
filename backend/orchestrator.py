@@ -1,16 +1,56 @@
 import asyncio
 import json
+import re
 from datetime import datetime
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from branch_generator import branch_label, generate_branches
-from codebase_graph import codebase_context_for_prompt, list_known_files, match_known_file
+from codebase_graph import (
+    codebase_context_for_prompt,
+    list_known_files,
+    match_known_file,
+    parse_snapshot_chunks,
+)
 from context_retriever import get_relevant_context
 from git_engine import make_patch, merge_code
 from models import DEFAULT_BEAM_WIDTH, Branch, PatchOutcome, QueryEntry, TreeNode
 from tree_state import TreeStateManager
 
 OnBranchReady = Callable[[Branch], Awaitable[None]]
+
+# Phase 9 (2026-10-19): real bug, reported by the user -- "Apply to
+# current"/"Spawn branch from here" were offered for EVERY query answer
+# unconditionally, including purely factual ones ("what is the app name")
+# with nothing meaningful to incorporate as a code revision. Same pattern
+# as Branch.is_code_change: the model classifies itself, no steering bias
+# toward either answer.
+_QUERY_INSTRUCTION = """Answer the question directly and completely.
+Then decide whether your answer is an ACTIONABLE clarification -- something
+that could meaningfully change the code (a corrected requirement, a design
+decision, a constraint) -- as opposed to purely informational (explaining
+what existing code does, a factual lookup, general discussion).
+Return ONLY JSON: {"answer": "...", "actionable": true|false}"""
+
+
+def _parse_query_response(response: str) -> Tuple[str, bool]:
+    """Returns (answer, actionable). Mirrors branch_generator._parse's own
+    shape and defaults -- fenced-block stripping, fail-open on anything
+    that doesn't parse. Unlike `is_code_change`, `actionable` defaults to
+    True on any parse failure: this is a UI-affordance decision (show/hide
+    a button), not a trust boundary -- clicking "Apply to current" still
+    goes through real conflict detection before any file write, so there's
+    no real downside to the generous default, and a parse hiccup
+    shouldn't silently take away a working feature.
+    """
+    text = response.strip()
+    fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
+    if fenced:
+        text = fenced.group(1)
+    try:
+        data = json.loads(text)
+        return data.get("answer", response), bool(data.get("actionable", True))
+    except (json.JSONDecodeError, TypeError):
+        return response, True
 
 
 def _resolve_target(
@@ -108,6 +148,61 @@ async def _maybe_redirect_target(
     return branch, None, False
 
 
+_MAX_ADDITIONAL_FILES = 3
+
+
+async def _resolve_additional_edits(
+    llm_client,
+    prompt: str,
+    context_summary: str,
+    user_preferences: List[str],
+    codebase_context_full: Optional[str],
+    scoped_context_sent: Optional[str],
+    include_codebase: bool,
+    intent: str,
+    additional_files: Dict[str, str],
+) -> Dict[str, str]:
+    """Phase 8 (2026-10-19): a request can need changes to files OTHER than
+    the primary target_file (e.g. "change X in constants.py and Y in
+    util.py") -- `branch.additional_files` carries what the model claims,
+    but exactly like Phase 7's redirect, that content is only trustworthy
+    if the model actually SAW the file it's claiming to edit.
+
+    For each declared file (capped at `_MAX_ADDITIONAL_FILES` to bound
+    worst-case cost -- anything beyond that is dropped, not guessed at):
+    - Not a real, known file (hallucinated path) -> dropped, same
+      conservative-by-default rule as the redirect mechanism.
+    - Already part of `scoped_context_sent` (the model genuinely saw it
+      for THIS call) -> trusted directly, no extra cost.
+    - Named in the manifest but not actually shown -> fires exactly one
+      verification call scoped to that file (reusing the same graph-
+      scoping machinery the redirect retry uses) before trusting it. If
+      that call also fails, the file is dropped entirely -- never fall
+      back to the original, unverified content.
+    """
+    if not additional_files or not codebase_context_full or not include_codebase:
+        return {}
+    known = list_known_files(codebase_context_full)
+    shown = set(parse_snapshot_chunks(scoped_context_sent)) if scoped_context_sent else set()
+    resolved: Dict[str, str] = {}
+    for raw_path, content in list(additional_files.items())[:_MAX_ADDITIONAL_FILES]:
+        matched = match_known_file(raw_path, known)
+        if matched is None:
+            continue  # hallucinated path -- never trust it
+        if matched in shown:
+            resolved[matched] = content  # model actually saw this file's real content
+            continue
+        verified = await generate_branches(
+            prompt, context_summary, user_preferences, llm_client, beam_width=1,
+            codebase_context=codebase_context_for_prompt(codebase_context_full, matched, include_codebase),
+            intent=intent,
+        )
+        if verified:
+            resolved[matched] = verified[0].code
+        # else: drop it -- never trust the original, unverified content.
+    return resolved
+
+
 async def _resolve_node_target(
     llm_client,
     prompt: str,
@@ -119,14 +214,15 @@ async def _resolve_node_target(
     include_codebase: bool,
     intent: str,
     branch: Branch,
-) -> Tuple[Branch, Optional[str], Optional[Dict[str, int]]]:
+) -> Tuple[Branch, Optional[str], Optional[Dict[str, int]], Dict[str, str]]:
     """Shared by `_branch_unlocked.on_result` and `_continue_from_unlocked`
     (simplification, code review 2026-10-18): both used to copy-paste the
     same `_maybe_redirect_target` call + effective-target bookkeeping +
     `_resolve_target` call, which meant a future fix to this sequence (like
     the retry-failure bug above) had to be applied in two places or risk
     `branch()` and `continue_from()` drifting apart for the same scenario.
-    Returns `(the branch to actually use, node_target_file, node_target_range)`.
+    Returns `(the branch to actually use, node_target_file, node_target_range,
+    additional_edits)`.
 
     Second review pass (2026-10-19): when `_maybe_redirect_target` reports
     `trusted=False` (the redirect retry failed), the target is stripped
@@ -138,17 +234,35 @@ async def _resolve_node_target(
     design -- an explicit intent override is about whose CLASSIFICATION to
     trust, not about whether content was ever verified. Those are
     orthogonal; correctness has to win regardless of intent.
+
+    Phase 8 (2026-10-19): once the node's real target_file is resolved,
+    additional files are only resolved if this really is a trusted code
+    change (`node_target_file is not None`) -- a question, or an untrusted
+    branch, has no business touching any file, primary or otherwise.
+    `scoped_context_sent` is recomputed against the FINAL `node_target_file`
+    (not the original candidate) so "was this file already shown" reflects
+    whatever the trusted branch's own LLM call was actually scoped to,
+    whether or not a redirect happened.
     """
     branch, redirected_to, trusted = await _maybe_redirect_target(
         llm_client, prompt, context_summary, user_preferences,
         codebase_context_full, candidate_target_file, include_codebase, intent, branch,
     )
     if not trusted:
-        return branch, None, None
+        return branch, None, None, {}
     effective_target_file = redirected_to or candidate_target_file
     effective_target_range = None if redirected_to else candidate_target_range
     node_target_file, node_target_range = _resolve_target(intent, effective_target_file, effective_target_range, branch)
-    return branch, node_target_file, node_target_range
+
+    additional_edits: Dict[str, str] = {}
+    if node_target_file is not None and branch.additional_files:
+        scoped_context_sent = codebase_context_for_prompt(codebase_context_full, node_target_file, include_codebase)
+        additional_edits = await _resolve_additional_edits(
+            llm_client, prompt, context_summary, user_preferences,
+            codebase_context_full, scoped_context_sent, include_codebase, intent,
+            branch.additional_files,
+        )
+    return branch, node_target_file, node_target_range, additional_edits
 
 
 class LLMGenerationFailed(RuntimeError):
@@ -246,7 +360,7 @@ class Orchestrator:
             # exists) forbids. Only a redirecting branch pays this cost;
             # siblings that don't redirect still fire on their own first
             # call's completion, unaffected.
-            b, node_target_file, node_target_range = await _resolve_node_target(
+            b, node_target_file, node_target_range, additional_edits = await _resolve_node_target(
                 self.llm, prompt, parent.context_summary, parent.user_preferences,
                 parent.codebase_context, target_file, target_range, include_codebase, intent, b,
             )
@@ -265,6 +379,7 @@ class Orchestrator:
                 target_file=node_target_file,
                 target_range=node_target_range,
                 codebase_context=parent.codebase_context,
+                additional_edits=additional_edits,
             )
             self.tree.add_node(node)
             b.node_id = node.id
@@ -326,7 +441,7 @@ class Orchestrator:
         if not branches:
             raise LLMGenerationFailed(f"LLM failed to generate a continuation for node {node_id}")
         branch = branches[0]
-        branch, node_target_file, node_target_range = await _resolve_node_target(
+        branch, node_target_file, node_target_range, additional_edits = await _resolve_node_target(
             self.llm, prompt, parent.context_summary, parent.user_preferences,
             parent.codebase_context, target_file, target_range, include_codebase, intent, branch,
         )
@@ -345,6 +460,7 @@ class Orchestrator:
             target_file=node_target_file,
             target_range=node_target_range,
             codebase_context=parent.codebase_context,
+            additional_edits=additional_edits,
         )
         self.tree.add_node(node)
         return self.tree.get_node(node.id)
@@ -401,8 +517,8 @@ class Orchestrator:
         chained = f"Prior question: {prior.question}\nPrior answer: {prior.answer}\n\n" if prior else ""
 
         try:
-            answer = await self.llm.complete(
-                messages=[{"role": "user", "content": f"{chained}Question: {question}"}],
+            response = await self.llm.complete(
+                messages=[{"role": "user", "content": f"{_QUERY_INSTRUCTION}\n\n{chained}Question: {question}"}],
                 system=context,
             )
         except Exception as e:
@@ -411,12 +527,14 @@ class Orchestrator:
             # exactly what it was before this call.
             raise LLMGenerationFailed(f"LLM failed to answer the query for node {node_id}: {e}")
 
+        answer, actionable = _parse_query_response(response)
         entry = QueryEntry(
             id=self.tree.new_id(),
             question=question,
             answer=answer,
             timestamp=datetime.utcnow(),
             chained_from=chain_from,
+            actionable=actionable,
         )
         self.tree.add_query_entry(node_id, entry)
         return entry

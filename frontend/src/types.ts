@@ -4,6 +4,11 @@ export interface QueryEntry {
   answer: string;
   timestamp: string;
   chained_from: string | null;
+  // Phase 9 (2026-10-19): whether this answer is an actual, actionable
+  // clarification vs. purely informational -- the model self-classifies,
+  // same pattern as Branch's is_code_change. Defaults true for old
+  // sessions saved before this field existed.
+  actionable: boolean;
 }
 
 export interface TargetRange {
@@ -33,6 +38,10 @@ export interface TreeNode {
   // parent->child, populated once a workspace is declared (extension-only
   // — the standalone web app has no filesystem access to declare one).
   codebase_context: string | null;
+  // Phase 8 (2026-10-19): any files OTHER than target_file this node also
+  // edits, keyed by path, full new content as the value. Empty for the
+  // overwhelming majority of nodes (single-file requests).
+  additional_edits: Record<string, string>;
 }
 
 // 2026-10-17 amendment: "auto" (default) lets the model classify its own

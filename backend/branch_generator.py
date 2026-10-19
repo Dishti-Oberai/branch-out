@@ -80,10 +80,25 @@ Task is actually about one of those other files rather than the one shown
 below, set "target_file" to that exact path from the list. Otherwise omit
 it or set it to null — never invent a path that isn't in that list."""
 
+# Phase 8 (2026-10-19): a request can genuinely need changes to MORE than
+# one file (e.g. "change X in constants.py and Y in util.py") -- before
+# this, the model had no way to express that at all, so it described the
+# second file's change in prose and silently never produced real code for
+# it. "code"/"target_file" stay the single primary file exactly as
+# before; this is strictly additive for anything beyond that.
+_ADDITIONAL_FILES_GUIDANCE = """
+If the Task genuinely needs changes to files OTHER than the one you're
+putting in "code" (not just the primary target), set "additional_files" to
+an object mapping each such file's exact path (from the "Other files" list
+if given, or any file you can see) to its FULL new content. Only ever
+include a file there if you can actually see its real content somewhere
+above -- never invent changes for a file you haven't been shown. Omit
+"additional_files" or leave it empty for the normal, single-file case."""
+
 _CODE_CHANGE_INSTRUCTION = """You are a coding assistant generating approach {approach} of {beam_width}.
 Generate a MEANINGFULLY DIFFERENT approach from the others.
-Make the requested change and explain it in "reasoning".""" + _TARGET_FILE_GUIDANCE + """
-Return only JSON: {{"code": "...", "reasoning": "...", "is_code_change": true, "target_file": null}}"""
+Make the requested change and explain it in "reasoning".""" + _TARGET_FILE_GUIDANCE + _ADDITIONAL_FILES_GUIDANCE + """
+Return only JSON: {{"code": "...", "reasoning": "...", "is_code_change": true, "target_file": null, "additional_files": {{}}}}"""
 
 # Amendment (2026-10-17): "auto" is the model's own honest classification
 # instead of being told the answer in advance -- a real bug (found via a
@@ -117,8 +132,8 @@ If it's a change: make the change and explain it in "reasoning".
 Even if the Task reads as feedback or conversation (e.g. "you should have
 done X instead") rather than a direct instruction, you MUST still respond
 with ONLY the JSON object below -- never plain prose with no JSON wrapper
-at all.""" + _TARGET_FILE_GUIDANCE + """
-Return only JSON: {{"code": "...", "reasoning": "...", "is_code_change": true|false, "target_file": null}}"""
+at all.""" + _TARGET_FILE_GUIDANCE + _ADDITIONAL_FILES_GUIDANCE + """
+Return only JSON: {{"code": "...", "reasoning": "...", "is_code_change": true|false, "target_file": null, "additional_files": {{}}}}"""
 
 _INSTRUCTIONS = {"question": _QUESTION_INSTRUCTION, "code_change": _CODE_CHANGE_INSTRUCTION, "auto": _AUTO_INSTRUCTION}
 
@@ -148,21 +163,39 @@ async def _generate_single_branch(
         }],
         system=system,
     )
-    code, reasoning, is_code_change, target_file = _parse(response)
+    code, reasoning, is_code_change, target_file, additional_files = _parse(response)
     return Branch(
-        node_id="", code=code, reasoning=reasoning, is_code_change=is_code_change, target_file=target_file
+        node_id="", code=code, reasoning=reasoning, is_code_change=is_code_change, target_file=target_file,
+        additional_files=additional_files,
     )
 
 
+def _extract_additional_files(data: dict) -> dict:
+    """Phase 8 (2026-10-19): defensive extraction for "additional_files" --
+    must be a dict of {str: str}, otherwise drop it entirely rather than
+    let a malformed shape (e.g. a list, or non-string values) propagate
+    into orchestrator._resolve_additional_edits as something it doesn't
+    expect. Conservative by design, same as every other "uncertain? don't
+    proceed" field here.
+    """
+    raw = data.get("additional_files")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
+
+
 def _parse(response: str):
-    """Returns (code, reasoning, is_code_change, target_file). `is_code_change`
-    defaults to False whenever it's missing or the response doesn't parse at
-    all — conservative by design (2026-10-17 amendment): when uncertain
-    whether this was actually a code change, don't let a node claim
-    `target_file` it may not deserve, same principle as every other
-    "conflict ambiguous? don't silently proceed" rule in this codebase.
-    `target_file` (Phase 7, 2026-10-17) defaults to None the same way --
-    None means "no redirect", i.e. use whatever target was already given.
+    """Returns (code, reasoning, is_code_change, target_file,
+    additional_files). `is_code_change` defaults to False whenever it's
+    missing or the response doesn't parse at all — conservative by design
+    (2026-10-17 amendment): when uncertain whether this was actually a
+    code change, don't let a node claim `target_file` it may not deserve,
+    same principle as every other "conflict ambiguous? don't silently
+    proceed" rule in this codebase. `target_file` (Phase 7, 2026-10-17)
+    defaults to None the same way -- None means "no redirect", i.e. use
+    whatever target was already given. `additional_files` (Phase 8,
+    2026-10-19) defaults to `{}` the same way -- empty means no files
+    beyond the primary one.
     """
     text = response.strip()
     fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
@@ -172,7 +205,7 @@ def _parse(response: str):
         data = json.loads(text)
         return (
             data["code"], data.get("reasoning", ""), bool(data.get("is_code_change", False)),
-            data.get("target_file") or None,
+            data.get("target_file") or None, _extract_additional_files(data),
         )
     except (json.JSONDecodeError, KeyError, TypeError):
         pass
@@ -191,7 +224,7 @@ def _parse(response: str):
         data = json.loads(repaired)
         return (
             data["code"], data.get("reasoning", ""), bool(data.get("is_code_change", False)),
-            data.get("target_file") or None,
+            data.get("target_file") or None, _extract_additional_files(data),
         )
     except (json.JSONDecodeError, KeyError, TypeError):
         # Model ignored the format entirely -- keep its output rather than
@@ -209,7 +242,7 @@ def _parse(response: str):
         # entirely unless they went digging in the Code snapshot section.
         # The raw text almost always IS the intended answer in this case --
         # surface it as the answer, not as code.
-        return response, response, False, None
+        return response, response, False, None, {}
 
 
 def branch_label(index: int) -> str:

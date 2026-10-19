@@ -50,7 +50,7 @@ def test_parse_repairs_a_dropped_n_in_a_json_newline_escape():
     # to the "unparsed model output" fallback, storing the raw JSON wrapper
     # (still containing literal backslashes, unresolved) as "code" — which
     # can never be valid Python. The repair must recover real code instead.
-    code, reasoning, is_code_change, target_file = _parse(REAL_MALFORMED_RESPONSE)
+    code, reasoning, is_code_change, target_file, additional_files = _parse(REAL_MALFORMED_RESPONSE)
     assert code.startswith("import unittest\nimport math\n\ndef is_prime(n):\n    if n < 2:")
     assert reasoning == "Trial division."
     compile(code, "<candidate>", "exec")  # must be valid Python, not just non-empty
@@ -61,7 +61,7 @@ def test_parse_still_falls_back_when_truly_unparseable():
     # it's almost always the model's real (prose) answer when it ignores
     # the JSON format, so it must surface where the UI shows "the answer"
     # (reasoning), not be hidden behind a placeholder label.
-    code, reasoning, is_code_change, target_file = _parse("this is not json and has no recoverable structure at all")
+    code, reasoning, is_code_change, target_file, additional_files = _parse("this is not json and has no recoverable structure at all")
     assert code == "this is not json and has no recoverable structure at all"
     assert reasoning == "this is not json and has no recoverable structure at all"
     assert is_code_change is False  # conservative default when unparseable
@@ -89,38 +89,72 @@ def test_on_result_fires_per_branch_as_it_completes_including_failures():
 
 
 def test_parse_extracts_is_code_change_true():
-    code, reasoning, is_code_change, target_file = _parse('{"code": "x = 1", "reasoning": "r", "is_code_change": true}')
+    code, reasoning, is_code_change, target_file, additional_files = _parse('{"code": "x = 1", "reasoning": "r", "is_code_change": true}')
     assert is_code_change is True
 
 
 def test_parse_extracts_is_code_change_false():
-    code, reasoning, is_code_change, target_file = _parse('{"code": "x = 1", "reasoning": "r", "is_code_change": false}')
+    code, reasoning, is_code_change, target_file, additional_files = _parse('{"code": "x = 1", "reasoning": "r", "is_code_change": false}')
     assert is_code_change is False
 
 
 def test_parse_defaults_is_code_change_false_when_field_missing():
     # The model is asked for it, but if it ever omits the field entirely,
     # stay conservative rather than assuming a code change happened.
-    code, reasoning, is_code_change, target_file = _parse('{"code": "x = 1", "reasoning": "r"}')
+    code, reasoning, is_code_change, target_file, additional_files = _parse('{"code": "x = 1", "reasoning": "r"}')
     assert is_code_change is False
 
 
 def test_parse_extracts_target_file_when_model_declares_one():
-    code, reasoning, is_code_change, target_file = _parse(
+    code, reasoning, is_code_change, target_file, additional_files = _parse(
         '{"code": "x = 1", "reasoning": "r", "is_code_change": true, "target_file": "util.py"}'
     )
     assert target_file == "util.py"
 
 
 def test_parse_defaults_target_file_none_when_missing():
-    code, reasoning, is_code_change, target_file = _parse(
+    code, reasoning, is_code_change, target_file, additional_files = _parse(
         '{"code": "x = 1", "reasoning": "r", "is_code_change": true}'
     )
     assert target_file is None
 
 
 def test_parse_defaults_target_file_none_when_explicitly_null():
-    code, reasoning, is_code_change, target_file = _parse(
+    code, reasoning, is_code_change, target_file, additional_files = _parse(
         '{"code": "x = 1", "reasoning": "r", "is_code_change": true, "target_file": null}'
     )
     assert target_file is None
+
+
+def test_parse_extracts_additional_files_when_declared():
+    code, reasoning, is_code_change, target_file, additional_files = _parse(
+        '{"code": "x = 1", "reasoning": "r", "is_code_change": true, '
+        '"additional_files": {"util.py": "def f(): pass"}}'
+    )
+    assert additional_files == {"util.py": "def f(): pass"}
+
+
+def test_parse_defaults_additional_files_empty_when_missing():
+    code, reasoning, is_code_change, target_file, additional_files = _parse(
+        '{"code": "x = 1", "reasoning": "r", "is_code_change": true}'
+    )
+    assert additional_files == {}
+
+
+def test_parse_drops_additional_files_when_not_a_dict_of_strings():
+    # Defensive extraction (Phase 8): a malformed shape must never
+    # propagate further than this -- drop it entirely rather than let
+    # orchestrator._resolve_additional_edits choke on something unexpected.
+    code, reasoning, is_code_change, target_file, additional_files = _parse(
+        '{"code": "x = 1", "reasoning": "r", "is_code_change": true, '
+        '"additional_files": ["not", "a", "dict"]}'
+    )
+    assert additional_files == {}
+
+
+def test_parse_drops_non_string_values_in_additional_files():
+    code, reasoning, is_code_change, target_file, additional_files = _parse(
+        '{"code": "x = 1", "reasoning": "r", "is_code_change": true, '
+        '"additional_files": {"util.py": "real content", "bad.py": 123}}'
+    )
+    assert additional_files == {"util.py": "real content"}

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Literal, Optional, Set
+from typing import Callable, Dict, Literal, Optional, Set
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -69,6 +69,15 @@ _workspace_root: Optional[Path] = None
 # fails open (allows the write) for any node it has no record for, rather
 # than blocking things it can't reason about.
 _source_snapshots: Dict[str, Optional[str]] = {}
+
+# Phase 8 (2026-10-19): the same idea as `_source_snapshots` above, but for
+# a node's `additional_edits` -- keyed by node id, then by that file's own
+# resolved path. There's no `target_range` concept for additional files
+# (always full-file content), so this only ever needs the real on-disk
+# content at generation time, same conflict-detection role the primary
+# file's snapshot plays for `_sync_active_file_to_disk`'s first sync of a
+# given path.
+_additional_source_snapshots: Dict[str, Dict[str, str]] = {}
 
 # Phase 5.6 (2026-10-06): the VS Code extension's live active editor/
 # selection, reported continuously via POST /active-editor-context.
@@ -160,13 +169,80 @@ def _capture_source_snapshot(node: TreeNode) -> None:
     (Phase 5.5). A no-op for nodes without target_file, or before any
     workspace is declared (nothing to snapshot against yet).
     """
-    if not node.target_file or _workspace_root is None:
-        return
+    if node.target_file and _workspace_root is not None:
+        try:
+            target = _resolve_target_path(node.target_file)
+            _source_snapshots[node.id] = _read_file(target)
+        except HTTPException:
+            pass  # can't resolve it safely; just don't track it
+
+    # Phase 8 (2026-10-19): same capture, per additional file -- needed
+    # for the exact same reason, just scoped to each extra path instead
+    # of the one primary target_file.
+    if node.additional_edits and _workspace_root is not None:
+        snapshots: Dict[str, str] = {}
+        for path in node.additional_edits:
+            try:
+                target = _resolve_target_path(path)
+                content = _read_file(target)
+                if content is not None:
+                    snapshots[path] = content
+            except HTTPException:
+                continue  # can't resolve it safely; just don't track it
+        if snapshots:
+            _additional_source_snapshots[node.id] = snapshots
+
+
+async def _sync_one_file(
+    node_id: str, raw_target_file: str, intended: str, fallback_ancestor: str,
+    on_synced: Optional[Callable[[str], None]] = None,
+) -> None:
+    """The actual per-file sync: real three-way merge (ancestor=last
+    synced, ours=current disk, theirs=`intended`), real conflict detection,
+    fail-open throughout. Factored out (Phase 8, 2026-10-19) so the
+    primary `target_file` and each of `node.additional_edits` go through
+    the exact same logic — previously this lived inline in
+    `_sync_active_file_to_disk`, written before there was more than one
+    file to sync per node. See that function's own docstring (still above
+    it) for the full "why `_file_last_synced`, not just the node's own
+    snapshot" rationale, which applies identically here.
+
+    `on_synced`, if given, is called with the final written content on
+    success — lets the primary-file caller also update `_source_snapshots`
+    for apply-to-file's own diffing, without this helper needing to know
+    about that at all.
+    """
     try:
-        target = _resolve_target_path(node.target_file)
+        target = _resolve_target_path(raw_target_file)
     except HTTPException:
-        return  # can't resolve it safely; just don't track it
-    _source_snapshots[node.id] = _read_file(target)
+        return  # can't resolve it safely; just don't sync
+    key = str(target)
+
+    ancestor = _file_last_synced.get(key)
+    if ancestor is None:
+        ancestor = fallback_ancestor
+    current_on_disk = _read_file(target) or ""
+
+    if current_on_disk != ancestor:
+        patch_text = make_patch(ancestor, intended)
+        result = merge_code(current_on_disk, patch_text)
+        if not result.success:
+            await _broadcast("conflict.detected", {
+                "node_id": node_id,
+                "target_file": str(target),
+                "diff_preview": result.diff_preview,
+            })
+            return  # best-effort: don't write, don't block activation
+        intended = result.merged_code
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(intended)
+        _file_last_synced[key] = intended
+        if on_synced:
+            on_synced(intended)
+    except OSError as e:
+        logger.error("Phase 5.6 file sync failed for %s: %s", target, e)  # fail open
 
 
 async def _sync_active_file_to_disk(node: TreeNode) -> None:
@@ -197,50 +273,36 @@ async def _sync_active_file_to_disk(node: TreeNode) -> None:
     conflict path uses) so the user finds out immediately, but never
     blocks the switch itself.
 
-    No-op for a node without `target_file`, or before any workspace is
-    declared — nothing to sync.
+    Phase 8 (2026-10-19): now ALSO syncs every file in `node.additional_
+    edits`, independently of the primary `target_file` and of each other
+    -- one file's conflict (or missing workspace resolution) must never
+    block the others from writing, same fail-open rule the primary file
+    already followed, just extended to N files instead of 1.
+
+    No-op for a node with no `target_file` and no `additional_edits`, or
+    before any workspace is declared — nothing to sync.
     """
-    if not node.target_file or _workspace_root is None:
+    if _workspace_root is None:
         return
-    try:
-        target = _resolve_target_path(node.target_file)
-    except HTTPException:
-        return  # can't resolve it safely; just don't sync
-    key = str(target)
 
-    # Reconstruct what the whole file looks like with this node's code
-    # applied — needed for target_range nodes, whose code_snapshot is only
-    # ever a snippet, never the whole file.
-    original_at_generation = _source_snapshots.get(node.id) or ""
-    intended = (
-        _splice_range(original_at_generation, node.target_range, node.code_snapshot)
-        if node.target_range else node.code_snapshot
-    )
+    if node.target_file:
+        # Reconstruct what the whole file looks like with this node's code
+        # applied — needed for target_range nodes, whose code_snapshot is
+        # only ever a snippet, never the whole file.
+        original_at_generation = _source_snapshots.get(node.id) or ""
+        intended = (
+            _splice_range(original_at_generation, node.target_range, node.code_snapshot)
+            if node.target_range else node.code_snapshot
+        )
 
-    ancestor = _file_last_synced.get(key)
-    if ancestor is None:
-        ancestor = _source_snapshots.get(node.id) or ""
-    current_on_disk = _read_file(target) or ""
+        def _remember_primary(written: str) -> None:
+            _source_snapshots[node.id] = written
 
-    if current_on_disk != ancestor:
-        patch_text = make_patch(ancestor, intended)
-        result = merge_code(current_on_disk, patch_text)
-        if not result.success:
-            await _broadcast("conflict.detected", {
-                "node_id": node.id,
-                "target_file": str(target),
-                "diff_preview": result.diff_preview,
-            })
-            return  # best-effort: don't write, don't block activation
-        intended = result.merged_code
+        await _sync_one_file(node.id, node.target_file, intended, original_at_generation, _remember_primary)
 
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(intended)
-        _file_last_synced[key] = intended
-        _source_snapshots[node.id] = intended
-    except OSError as e:
-        logger.error("Phase 5.6 file sync failed for %s: %s", target, e)  # fail open
+    for path, content in node.additional_edits.items():
+        fallback_ancestor = _additional_source_snapshots.get(node.id, {}).get(path, "")
+        await _sync_one_file(node.id, path, content, fallback_ancestor)
 
 
 async def _broadcast(event: str, payload: dict) -> None:
@@ -748,6 +810,18 @@ async def apply_to_file(req: ApplyToFileRequest):
 
     _source_snapshots[req.node_id] = intended
     _file_last_synced[str(target)] = intended
+
+    # Phase 8 (2026-10-19): a node reached via this endpoint (a branch the
+    # user picked manually, not yet auto-activated) can also have
+    # additional_edits. These use the same fail-open sync as activation
+    # does, deliberately NOT the strict refuse-with-409 contract above --
+    # that contract is specifically about the PRIMARY file the user just
+    # explicitly asked to apply; an additional file conflicting shouldn't
+    # turn an otherwise-successful "Apply" action into a hard failure.
+    for path, content in node.additional_edits.items():
+        fallback_ancestor = _additional_source_snapshots.get(req.node_id, {}).get(path, "")
+        await _sync_one_file(req.node_id, path, content, fallback_ancestor)
+
     return {"path": str(target)}
 
 
