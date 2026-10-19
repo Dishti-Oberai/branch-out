@@ -132,6 +132,26 @@ export default function NodeInspector({
     }
   }
 
+  // Real bug, reported by the user (2026-10-19): clicking "Spawn branch
+  // from here" repeatedly creates a new branch every time, with nothing
+  // stopping accidental repeat clicks. Worse than a missing debounce --
+  // `spawnBranch` below (backed by orchestrator.merge(), Option C) isn't
+  // actually scoped to any particular query entry at all; it always does
+  // the exact same `onMerge(node.id, activeNodeId)` regardless of which
+  // entry's button triggered it (see its own docstring: "not a specific
+  // query clarification... whatever preferences accumulated along the
+  // path"). So the button rendered inside each entry row LOOKS
+  // per-clarification but isn't, and nothing prevented firing the
+  // identical action over and over. Guarded at the node level (one spawn
+  // per inspector session), with an explicit, deliberate override for the
+  // rare case where a second one really is wanted.
+  const [hasSpawnedBranch, setHasSpawnedBranch] = useState(false);
+  // Lighter version of the same issue for "Apply to current" (/patch):
+  // each use IS tied to a specific clarification's real content, so
+  // re-applying a DIFFERENT entry is always fine -- only guard against
+  // re-applying the SAME entry twice.
+  const [appliedQueryIds, setAppliedQueryIds] = useState<Set<string>>(new Set());
+
   async function applyToCurrent(queryId: string, force = false) {
     if (!activeNodeId) return;
     setPatchBusy(true);
@@ -141,6 +161,7 @@ export default function NodeInspector({
         setConflict({ queryId, diffPreview: result.outcome.diff_preview ?? "" });
       } else {
         setConflict(null);
+        setAppliedQueryIds((prev) => new Set(prev).add(queryId));
       }
     } finally {
       setPatchBusy(false);
@@ -148,11 +169,12 @@ export default function NodeInspector({
   }
 
   async function spawnBranch() {
-    if (!activeNodeId) return;
+    if (!activeNodeId || hasSpawnedBranch) return;
     setPatchBusy(true);
     try {
       await onMerge(node.id, activeNodeId);
       setConflict(null);
+      setHasSpawnedBranch(true);
     } finally {
       setPatchBusy(false);
     }
@@ -192,13 +214,23 @@ export default function NodeInspector({
                   {(canApplyToCurrent || canSpawnBranch) && (
                     <div className="query-actions">
                       {canApplyToCurrent && (
-                        <button type="button" disabled={patchBusy} onClick={() => applyToCurrent(q.id)}>
-                          Apply to current
+                        <button
+                          type="button"
+                          disabled={patchBusy || appliedQueryIds.has(q.id)}
+                          title={appliedQueryIds.has(q.id) ? "Already applied this clarification — pick a different one, or ask a new question" : undefined}
+                          onClick={() => applyToCurrent(q.id)}
+                        >
+                          {appliedQueryIds.has(q.id) ? "✓ Applied" : "Apply to current"}
                         </button>
                       )}
                       {canSpawnBranch && (
-                        <button type="button" disabled={patchBusy} onClick={spawnBranch}>
-                          Spawn branch from here
+                        <button
+                          type="button"
+                          disabled={patchBusy || hasSpawnedBranch}
+                          title={hasSpawnedBranch ? "Already spawned a branch from this node this session — see the note below to do it again" : undefined}
+                          onClick={spawnBranch}
+                        >
+                          {hasSpawnedBranch ? "✓ Spawned" : "Spawn branch from here"}
                         </button>
                       )}
                     </div>
@@ -213,7 +245,9 @@ export default function NodeInspector({
                         </button>
                         <button type="button" onClick={() => setConflict(null)}>Cancel</button>
                         {canSpawnBranch && (
-                          <button type="button" disabled={patchBusy} onClick={spawnBranch}>Spawn branch</button>
+                          <button type="button" disabled={patchBusy || hasSpawnedBranch} onClick={spawnBranch}>
+                            Spawn branch
+                          </button>
                         )}
                       </div>
                     </div>
@@ -230,6 +264,16 @@ export default function NodeInspector({
             <p className="muted">
               This is the active node — "Spawn branch from here" isn't offered since there's nothing
               downstream to merge; use "Apply to current" to revise it with this answer.
+            </p>
+          )}
+          {hasSpawnedBranch && (
+            <p className="muted">
+              Already spawned a branch from this node this session — "Spawn branch from here" always does
+              the same thing regardless of which clarification you click it from (it folds in accumulated
+              preferences, not that specific answer), so repeat clicks just create near-duplicate branches.{" "}
+              <button type="button" className="icon-btn" onClick={() => setHasSpawnedBranch(false)}>
+                Spawn another anyway
+              </button>
             </p>
           )}
           <form

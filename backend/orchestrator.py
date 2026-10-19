@@ -45,18 +45,38 @@ async def _maybe_redirect_target(
     include_codebase: bool,
     intent: str,
     branch: Branch,
-) -> Tuple[Branch, Optional[str]]:
+) -> Tuple[Branch, Optional[str], bool]:
     """Phase 7 (2026-10-17): if the model declared a `target_file` different
     from the one it was actually shown content for, `branch.code` is
     untrusted for that file -- unseen content, same rule everywhere else in
     this codebase. Fires exactly one retry, re-scoped to the declared file,
-    and returns `(that response, the matched file)` instead. Returns the
-    original branch and `None` (no redirect) when there's nothing to
-    redirect, or when the declared file isn't a real, known one
-    (hallucinated path) -- conservative by default.
+    and returns `(that response, the matched file, True)` instead. Returns
+    the original branch, `None`, `True` when there's nothing to redirect,
+    or when the declared file isn't a real, known one (hallucinated path)
+    -- conservative by default.
+
+    Real bug, caught by code review (2026-10-18), FIXED INCORRECTLY the
+    first time, caught again by a second review pass (2026-10-19): when the
+    retry itself fails (LLM error/rate limit), `branch.code` was generated
+    for the DECLARED file, not `candidate_target_file` -- it must never be
+    trusted for ANY file. The first fix forced `is_code_change=False` on
+    the returned branch, reasoning that `_resolve_target`'s "auto" rule
+    would then strip target_file. That's true only for `intent="auto"` --
+    under the EXPLICIT `intent="code_change"` override, `_resolve_target`
+    forces the target through unconditionally and never even looks at
+    `is_code_change` (by design: an explicit user override always wins
+    over the model's own classification). So the exact same wrong-file
+    write this mechanism exists to prevent still reproduced whenever a
+    user had "Code change" selected -- confirmed with a direct repro
+    before this second fix. The real fix: a third return value, `trusted`,
+    that the caller checks and acts on BEFORE `_resolve_target` ever runs,
+    so a retry failure overrides even an explicit intent -- correctness
+    (never apply unverified content) has to outrank intent overrides,
+    which are about WHOSE CLASSIFICATION to trust, not about whether
+    content was verified at all.
     """
     if not branch.target_file or not codebase_context_full or not include_codebase:
-        return branch, None
+        return branch, None, True
     if not candidate_target_file:
         # No target_file was given at all -> codebase_context_for_prompt
         # never scopes down without one, so the model already saw the
@@ -68,19 +88,67 @@ async def _maybe_redirect_target(
         # `target_file` anyway (the prompt always asks for the field),
         # degrading a correctly-grounded answer into one scoped to a
         # single file, plus an unnecessary extra LLM call.
-        return branch, None
+        return branch, None, True
     known = list_known_files(codebase_context_full)
     matched = match_known_file(branch.target_file, known)
     if matched is None:
-        return branch, None  # hallucinated path -- don't trust it
+        return branch, None, True  # hallucinated path -- don't trust it
     if match_known_file(candidate_target_file, known) == matched:
-        return branch, None  # declared the same file it was already given -- no redirect
+        return branch, None, True  # declared the same file it was already given -- no redirect
     retried = await generate_branches(
         prompt, context_summary, user_preferences, llm_client, beam_width=1,
         codebase_context=codebase_context_for_prompt(codebase_context_full, matched, include_codebase),
         intent=intent,
     )
-    return (retried[0], matched) if retried else (branch, None)
+    if retried:
+        return retried[0], matched, True
+    # Retry failed -- branch.code is untrusted for EITHER file (it was
+    # generated for `matched`, not candidate_target_file). `trusted=False`
+    # tells the caller to strip the target regardless of intent.
+    return branch, None, False
+
+
+async def _resolve_node_target(
+    llm_client,
+    prompt: str,
+    context_summary: str,
+    user_preferences: List[str],
+    codebase_context_full: Optional[str],
+    candidate_target_file: Optional[str],
+    candidate_target_range: Optional[Dict[str, int]],
+    include_codebase: bool,
+    intent: str,
+    branch: Branch,
+) -> Tuple[Branch, Optional[str], Optional[Dict[str, int]]]:
+    """Shared by `_branch_unlocked.on_result` and `_continue_from_unlocked`
+    (simplification, code review 2026-10-18): both used to copy-paste the
+    same `_maybe_redirect_target` call + effective-target bookkeeping +
+    `_resolve_target` call, which meant a future fix to this sequence (like
+    the retry-failure bug above) had to be applied in two places or risk
+    `branch()` and `continue_from()` drifting apart for the same scenario.
+    Returns `(the branch to actually use, node_target_file, node_target_range)`.
+
+    Second review pass (2026-10-19): when `_maybe_redirect_target` reports
+    `trusted=False` (the redirect retry failed), the target is stripped
+    HERE, before `_resolve_target` ever runs -- never through it. Checking
+    `trusted` only inside `_resolve_target`'s "auto" branch (the first,
+    incomplete fix) let an explicit `intent="code_change"` override force
+    the untrusted target through anyway, since that branch of
+    `_resolve_target` doesn't look at `is_code_change`/trust at all by
+    design -- an explicit intent override is about whose CLASSIFICATION to
+    trust, not about whether content was ever verified. Those are
+    orthogonal; correctness has to win regardless of intent.
+    """
+    branch, redirected_to, trusted = await _maybe_redirect_target(
+        llm_client, prompt, context_summary, user_preferences,
+        codebase_context_full, candidate_target_file, include_codebase, intent, branch,
+    )
+    if not trusted:
+        return branch, None, None
+    effective_target_file = redirected_to or candidate_target_file
+    effective_target_range = None if redirected_to else candidate_target_range
+    node_target_file, node_target_range = _resolve_target(intent, effective_target_file, effective_target_range, branch)
+    return branch, node_target_file, node_target_range
 
 
 class LLMGenerationFailed(RuntimeError):
@@ -166,13 +234,22 @@ class Orchestrator:
         async def on_result(i: int, b: Optional[Branch]) -> None:
             if b is None:
                 return  # that call failed; already logged in branch_generator
-            b, redirected_to = await _maybe_redirect_target(
+            # Deviation on record (code review, 2026-10-18): CLAUDE.md
+            # requires `branch.ready` to fire "the moment one branch's LLM
+            # call completes," but `_resolve_node_target` awaits a SECOND,
+            # sequential LLM call here when this branch redirects to a
+            # different target_file -- `on_branch_ready` below necessarily
+            # waits on it too. This is deliberate, not an oversight: the
+            # alternative is firing `branch.ready` with content that's
+            # still unverified for any real file, which the "never apply
+            # unseen content" rule (the entire reason Phase 7's redirect
+            # exists) forbids. Only a redirecting branch pays this cost;
+            # siblings that don't redirect still fire on their own first
+            # call's completion, unaffected.
+            b, node_target_file, node_target_range = await _resolve_node_target(
                 self.llm, prompt, parent.context_summary, parent.user_preferences,
-                parent.codebase_context, target_file, include_codebase, intent, b,
+                parent.codebase_context, target_file, target_range, include_codebase, intent, b,
             )
-            effective_target_file = redirected_to or target_file
-            effective_target_range = None if redirected_to else target_range
-            node_target_file, node_target_range = _resolve_target(intent, effective_target_file, effective_target_range, b)
             node = TreeNode(
                 id=self.tree.new_id(),
                 parent_id=parent.id,
@@ -249,13 +326,10 @@ class Orchestrator:
         if not branches:
             raise LLMGenerationFailed(f"LLM failed to generate a continuation for node {node_id}")
         branch = branches[0]
-        branch, redirected_to = await _maybe_redirect_target(
+        branch, node_target_file, node_target_range = await _resolve_node_target(
             self.llm, prompt, parent.context_summary, parent.user_preferences,
-            parent.codebase_context, target_file, include_codebase, intent, branch,
+            parent.codebase_context, target_file, target_range, include_codebase, intent, branch,
         )
-        effective_target_file = redirected_to or target_file
-        effective_target_range = None if redirected_to else target_range
-        node_target_file, node_target_range = _resolve_target(intent, effective_target_file, effective_target_range, branch)
         node = TreeNode(
             id=self.tree.new_id(),
             parent_id=parent.id,
@@ -576,6 +650,26 @@ class Orchestrator:
             raise ValueError(f"{node_a_id} and {node_b_id} are not siblings (same parent required)")
         parent = self.tree.get_node(a.parent_id)
 
+        # Real bug, caught by code review (2026-10-18): this used to use
+        # parent.target_file/target_range unconditionally for both the
+        # context scoping below AND the merged node itself -- but a
+        # /branch fan-out routinely gives children a target_file the
+        # parent never had (e.g. parent is root, target_file=None; each
+        # branch resolves its own target_file via _resolve_target). That
+        # silently dropped the siblings' real file association, making
+        # _sync_active_file_to_disk no-op on the merge result. Prefer
+        # whichever sibling actually has one -- they came from the same
+        # /branch call, so when both are set they're virtually always the
+        # same file; when they differ (independent per-branch "auto"
+        # classification), `a`'s wins, same "first" tie-break used
+        # elsewhere in this file (e.g. branch_label numbering).
+        merged_target_file = a.target_file or b.target_file or parent.target_file
+        merged_target_range = (
+            a.target_range if a.target_file == merged_target_file
+            else b.target_range if b.target_file == merged_target_file
+            else parent.target_range
+        )
+
         prompt = (
             "Two alternative solutions were generated for the same task. "
             "Synthesize ONE combined solution that takes the best aspects of "
@@ -585,7 +679,7 @@ class Orchestrator:
         )
         branches = await generate_branches(
             prompt, parent.context_summary, parent.user_preferences, self.llm, beam_width=1,
-            codebase_context=codebase_context_for_prompt(parent.codebase_context, parent.target_file, True),
+            codebase_context=codebase_context_for_prompt(parent.codebase_context, merged_target_file, True),
         )
         if not branches:
             raise LLMGenerationFailed(f"LLM failed to synthesize a merge of {node_a_id} and {node_b_id}")
@@ -607,8 +701,8 @@ class Orchestrator:
             status="normal",
             query_history=[],
             branch_label=f"Branch {branch_label(len(parent.children_ids))}",
-            target_file=parent.target_file,
-            target_range=parent.target_range,
+            target_file=merged_target_file,
+            target_range=merged_target_range,
             codebase_context=parent.codebase_context,
         )
         self.tree.add_node(node)

@@ -153,6 +153,8 @@ Every WebSocket event must fire the moment its data is available — not batched
 | `conflict.detected` | The moment conflict detection runs in `POST /patch` |
 | `node.stale` | The moment a node's status is set to `stale` |
 
+**Deviation on record (2026-10-19, caught by a second code-review pass — the first pass only left a local source comment, which this file's own precedent above requires be promoted here instead):** Phase 7's `orchestrator._maybe_redirect_target` can add a second, sequential LLM call for ONE branch in a fan-out (when that branch's response declares a redirect to a different target_file) — `on_branch_ready`, and therefore `branch.ready`, waits on it. This delays that one branch's event past "the moment its first LLM call completes," which is otherwise unconditional. Flagged and treated as a spec conflict this file resolves in favor of correctness: firing `branch.ready` before the redirect resolves would mean announcing a branch as ready with code that's still unverified for any real file — exactly what the redirect mechanism exists to prevent (CLAUDE.md's own fail-open discipline: "conflict ambiguous? never silently apply"). Only a redirecting branch pays this cost; every branch that doesn't redirect still fires on its own first call's completion, unaffected.
+
 ---
 
 ## Context graph discipline

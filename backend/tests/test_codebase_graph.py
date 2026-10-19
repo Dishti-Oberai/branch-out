@@ -18,6 +18,18 @@ def make_snapshot(files: dict) -> str:
     return "".join(f"--- {path} ---\n{content}\n\n" for path, content in files.items())
 
 
+def test_parse_snapshot_chunks_is_cached_across_calls_with_the_same_snapshot():
+    # Efficiency fix (code review, 2026-10-18): codebase_context_for_prompt
+    # and orchestrator._maybe_redirect_target can both call this with the
+    # exact same snapshot string within one session. `@lru_cache` makes
+    # the second call a cache hit -- confirmed by object identity, since a
+    # fresh parse would always build a brand-new dict.
+    snapshot = make_snapshot({"a.py": "x = 1\n"})
+    first = parse_snapshot_chunks(snapshot)
+    second = parse_snapshot_chunks(snapshot)
+    assert first is second
+
+
 def test_parse_snapshot_chunks_round_trips_a_real_gathered_snapshot(tmp_path):
     (tmp_path / "a.py").write_text("x = 1\n")
     (tmp_path / "b.py").write_text("y = 2\n")

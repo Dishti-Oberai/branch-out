@@ -184,6 +184,51 @@ def test_continue_from_ignores_a_hallucinated_target_file():
     assert len(llm.received) == 1  # no retry fired
 
 
+def test_continue_from_strips_target_when_the_redirect_retry_fails():
+    # Real bug, caught by code review (2026-10-18): the retry (call index
+    # 1) fails here -- the first response's code was generated for
+    # unrelated.py (a real, known file), not main.py, so it must NOT be
+    # silently attached to main.py just because the retry couldn't verify
+    # it. Conservative-by-default: strip the target entirely instead.
+    llm = FakeLLM(
+        response_fn=lambda i: json.dumps({
+            "code": "SECRET_UNRELATED_MARKER_CODE", "reasoning": "r", "is_code_change": True,
+            "target_file": "unrelated.py",
+        }),
+        fail_on={1},
+    )
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from("root", "task", target_file="main.py", include_codebase=True))
+    assert node.target_file is None  # never attached to main.py, which this code was never about
+    assert len(llm.received) == 2  # original call + the failed retry attempt
+
+
+def test_continue_from_strips_target_on_retry_failure_even_with_explicit_code_change_intent():
+    # Real bug, caught by a SECOND code review pass (2026-10-19): the fix
+    # above only worked for intent="auto" (the default). _resolve_target's
+    # "code_change" branch forces target_file through unconditionally and
+    # never looks at is_code_change/trust at all -- so the first fix
+    # (forcing is_code_change=False on the branch) had no effect whatsoever
+    # under an explicit "Code change" override, and the exact wrong-file
+    # write this mechanism exists to prevent still reproduced. Confirmed
+    # broken before the real fix (a `trusted` flag checked BEFORE
+    # _resolve_target runs, bypassing it entirely on distrust).
+    llm = FakeLLM(
+        response_fn=lambda i: json.dumps({
+            "code": "SECRET_UNRELATED_MARKER_CODE", "reasoning": "r", "is_code_change": True,
+            "target_file": "unrelated.py",
+        }),
+        fail_on={1},
+    )
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    node = asyncio.run(o.continue_from(
+        "root", "task", target_file="main.py", include_codebase=True, intent="code_change",
+    ))
+    assert node.target_file is None  # stripped despite the explicit override -- trust beats intent
+
+
 def test_continue_from_no_redirect_when_model_declares_the_same_file_it_was_given():
     llm = FakeLLM(response_fn=lambda i: json.dumps({
         "code": "x", "reasoning": "r", "is_code_change": True, "target_file": "main.py",
@@ -715,6 +760,23 @@ def test_merge_siblings_creates_a_new_child_of_the_shared_parent_and_activates_i
     assert "approach a" in sent_prompt and "approach b" in sent_prompt
 
 
+def test_merge_siblings_uses_siblings_own_target_file_not_parents():
+    # Real bug, caught by code review (2026-10-18): both siblings have a
+    # target_file the PARENT never had (e.g. parent is root, no file
+    # context; each child resolved its own via a /branch call's
+    # target_file). The merged node must inherit that real file
+    # association, not silently drop it back to the parent's None --
+    # otherwise _sync_active_file_to_disk would no-op on the merge result.
+    llm = FakeLLM(response_fn=lambda i: '{"code": "combined", "reasoning": "took the best of both"}')
+    o = Orchestrator(llm)
+    _add_node(o, "a", "root", code_snapshot="approach a", branch_label="Branch A", target_file="foo.py")
+    _add_node(o, "b", "root", code_snapshot="approach b", branch_label="Branch B", target_file="foo.py")
+
+    node = asyncio.run(o.merge_siblings("a", "b"))
+
+    assert node.target_file == "foo.py"
+
+
 def test_merge_siblings_rejects_nodes_with_different_parents():
     o = Orchestrator(FakeLLM())
     _add_node(o, "a", "root")
@@ -798,6 +860,27 @@ def test_intent_defaults_to_auto_when_not_specified():
     o = Orchestrator(llm)
     node = asyncio.run(o.continue_from("root", "task", target_file="out.py"))  # no intent passed
     assert node.target_file is None  # behaves as "auto"
+
+
+def test_branch_strips_target_on_retry_failure_even_with_explicit_code_change_intent():
+    # Same fix as continue_from's equivalent test above, exercised through
+    # branch()'s on_result path instead -- both call sites share
+    # _resolve_node_target, so this confirms the fix actually landed for
+    # both, not just one.
+    llm = FakeLLM(
+        response_fn=lambda i: json.dumps({
+            "code": "SECRET_UNRELATED_MARKER_CODE", "reasoning": "r", "is_code_change": True,
+            "target_file": "unrelated.py",
+        }),
+        fail_on={1},
+    )
+    o = Orchestrator(llm)
+    o.tree.set_codebase_context("root", _multi_file_snapshot())
+    branches = asyncio.run(o.branch(
+        "root", "task", beam_width=1, target_file="main.py", include_codebase=True, intent="code_change",
+    ))
+    node = o.tree.get_node(branches[0].node_id)
+    assert node.target_file is None
 
 
 def test_branch_intent_auto_strips_target_file_per_branch_based_on_its_own_classification():

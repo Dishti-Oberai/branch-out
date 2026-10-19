@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ast
 import re
+from functools import lru_cache
 from pathlib import PurePosixPath
 from typing import Dict, Iterable, List, Optional, Set
 
@@ -33,11 +34,23 @@ _JS_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx")
 _JS_IMPORT_RE = re.compile(r"""(?:from\s+|require\(\s*)['"](\.[^'"]+)['"]""")
 
 
+@lru_cache(maxsize=32)
 def parse_snapshot_chunks(snapshot: str) -> Dict[str, str]:
     """Splits a `gather_codebase_context()` snapshot back into
     {relpath: content}. Skips the truncation marker line (same `--- ... ---`
     shape but not a real file) and anything else that doesn't look like a
     real relative path.
+
+    Real inefficiency, caught by code review (2026-10-18): this function
+    re-runs the same regex split from scratch every time it's called, but
+    `codebase_context_for_prompt`, `select_relevant_subset`, and
+    `orchestrator._maybe_redirect_target` can all call it with the exact
+    SAME snapshot string within one session (a node's inherited, static
+    `codebase_context` doesn't change turn to turn) -- 2-3 redundant parses
+    per LLM call that has a target_file. `@lru_cache` makes repeat calls
+    with the same snapshot O(1) after the first. Safe: every caller only
+    ever reads the returned dict, never mutates it (confirmed by reading
+    every call site) -- cache correctness depends on that staying true.
     """
     parts = _CHUNK_HEADER_RE.split(snapshot)
     # parts = ['', path1, content1, path2, content2, ...] -- leading '' is
