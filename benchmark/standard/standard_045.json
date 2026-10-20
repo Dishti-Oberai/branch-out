@@ -1,0 +1,7 @@
+{
+  "id": "standard_045",
+  "description": "Reverse an integer",
+  "prompt": "Write a Python function `reverse_integer(x: int) -> int` that reverses the digits of a 32-bit signed integer `x` (preserving sign), returning 0 if the reversed value overflows a 32-bit signed integer range (-2**31 to 2**31 - 1).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_positive(self):\n        self.assertEqual(reverse_integer(123), 321)\n    def test_negative(self):\n        self.assertEqual(reverse_integer(-123), -321)\n    def test_trailing_zero(self):\n        self.assertEqual(reverse_integer(120), 21)\n    def test_overflow(self):\n        self.assertEqual(reverse_integer(1534236469), 0)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

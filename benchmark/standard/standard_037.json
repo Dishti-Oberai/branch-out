@@ -1,0 +1,7 @@
+{
+  "id": "standard_037",
+  "description": "Remove duplicates from a sorted array",
+  "prompt": "Write a Python function `remove_duplicates(nums: list[int]) -> list[int]` that returns a new list with duplicates removed from a sorted list, preserving order.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_duplicates(self):\n        self.assertEqual(remove_duplicates([1,1,2,2,3]), [1,2,3])\n    def test_no_duplicates(self):\n        self.assertEqual(remove_duplicates([1,2,3]), [1,2,3])\n    def test_empty(self):\n        self.assertEqual(remove_duplicates([]), [])\n    def test_all_same(self):\n        self.assertEqual(remove_duplicates([2,2,2]), [2])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

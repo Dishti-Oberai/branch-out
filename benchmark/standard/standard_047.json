@@ -1,0 +1,7 @@
+{
+  "id": "standard_047",
+  "description": "Count set bits (Hamming weight)",
+  "prompt": "Write a Python function `count_set_bits(n: int) -> int` that returns the number of 1-bits in the binary representation of a non-negative integer `n`, without using `bin(n).count('1')`.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_zero(self):\n        self.assertEqual(count_set_bits(0), 0)\n    def test_simple(self):\n        self.assertEqual(count_set_bits(11), 3)\n    def test_power_of_two(self):\n        self.assertEqual(count_set_bits(128), 1)\n    def test_all_ones(self):\n        self.assertEqual(count_set_bits(255), 8)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

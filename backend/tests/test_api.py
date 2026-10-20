@@ -671,6 +671,26 @@ def test_patch_unknown_node_is_404(client):
     assert r.status_code == 404
 
 
+def test_patch_file_mismatch_is_400(client, tmp_path):
+    # Real bug, reported by the user (2026-10-19): a clarification about a
+    # different file than `source` used to produce a nonsense diff and a
+    # bogus conflict banner. Now a clear 400 instead.
+    (tmp_path / "main.py").write_text("x = 1\n")
+    (tmp_path / "unrelated.py").write_text("y = 2\n")
+    main._orchestrator = Orchestrator(FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "x", "reasoning": "r", "is_code_change": True, "target_file": "unrelated.py",
+    })))
+    client.post("/workspace", json={"root": str(tmp_path)})
+    _add_node("source", "root", code_snapshot="line1\nline2\n", target_file="main.py",
+              codebase_context=main._orchestrator.tree.get_node("root").codebase_context)
+    _add_node("target", "root", code_snapshot="line1\nline2\n")
+    _add_query("source", "change something in unrelated.py", "sure")
+
+    r = client.post("/patch", json={"source_node_id": "source", "query_id": "q1", "target_node_id": "target"})
+    assert r.status_code == 400
+    assert "unrelated.py" in r.json()["detail"]
+
+
 def test_merge_creates_new_active_child_of_source(client):
     call_log = []
 

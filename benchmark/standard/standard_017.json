@@ -1,0 +1,7 @@
+{
+  "id": "standard_017",
+  "description": "Find the missing number in 1..n",
+  "prompt": "Write a Python function `find_missing(nums: list[int]) -> int` that, given a list containing n distinct numbers from 0 to n (inclusive) with exactly one missing, returns the missing number.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_missing_middle(self):\n        self.assertEqual(find_missing([3,0,1]), 2)\n    def test_missing_last(self):\n        self.assertEqual(find_missing([0,1]), 2)\n    def test_missing_first(self):\n        self.assertEqual(find_missing([1,2,3]), 0)\n    def test_single(self):\n        self.assertEqual(find_missing([1]), 0)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

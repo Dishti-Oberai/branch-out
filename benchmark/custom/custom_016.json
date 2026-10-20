@@ -1,0 +1,7 @@
+{
+  "id": "custom_016",
+  "description": "Memoization decorator",
+  "prompt": "Write a Python decorator `memoize` that caches a function's results by its positional arguments (assume arguments are hashable), so repeated calls with the same arguments don't recompute.",
+  "test_suite": "import unittest\n\ncall_count = {'n': 0}\n\n@memoize\ndef slow_add(a, b):\n    call_count['n'] += 1\n    return a + b\n\nclass Test(unittest.TestCase):\n    def test_caches_result(self):\n        call_count['n'] = 0\n        self.assertEqual(slow_add(2, 3), 5)\n        self.assertEqual(slow_add(2, 3), 5)\n        self.assertEqual(call_count['n'], 1)\n    def test_different_args_not_cached_together(self):\n        call_count['n'] = 0\n        slow_add(1, 1)\n        slow_add(1, 2)\n        self.assertEqual(call_count['n'], 2)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

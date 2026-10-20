@@ -1,0 +1,7 @@
+{
+  "id": "standard_043",
+  "description": "Roman numeral to integer",
+  "prompt": "Write a Python function `roman_to_int(s: str) -> int` that converts a valid Roman numeral string (using I, V, X, L, C, D, M, including subtractive notation like IV, IX) to an integer.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_simple(self):\n        self.assertEqual(roman_to_int('III'), 3)\n    def test_subtractive(self):\n        self.assertEqual(roman_to_int('IV'), 4)\n        self.assertEqual(roman_to_int('IX'), 9)\n    def test_complex(self):\n        self.assertEqual(roman_to_int('MCMXCIV'), 1994)\n    def test_lviii(self):\n        self.assertEqual(roman_to_int('LVIII'), 58)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

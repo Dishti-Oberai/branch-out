@@ -1,0 +1,7 @@
+{
+  "id": "custom_006",
+  "description": "LFU cache (design choice: frequency tracking strategy)",
+  "prompt": "Implement a class `LFUCache` with a fixed capacity, constructor `LFUCache(capacity: int)`, `get(key: int) -> int` (returns the value or -1 if absent, and counts as a use), and `put(key: int, value: int) -> None` (inserts/updates; if over capacity, evicts the LEAST FREQUENTLY used key, breaking ties by least-recently-used among equal frequencies).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_basic_get_put(self):\n        c = LFUCache(2)\n        c.put(1, 10)\n        c.put(2, 20)\n        self.assertEqual(c.get(1), 10)\n    def test_evicts_least_frequent(self):\n        c = LFUCache(2)\n        c.put(1, 10)\n        c.put(2, 20)\n        c.get(1)\n        c.get(1)\n        c.put(3, 30)\n        self.assertEqual(c.get(2), -1)\n        self.assertEqual(c.get(1), 10)\n        self.assertEqual(c.get(3), 30)\n    def test_missing_key(self):\n        c = LFUCache(1)\n        self.assertEqual(c.get(99), -1)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

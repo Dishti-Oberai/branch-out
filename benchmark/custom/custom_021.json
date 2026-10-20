@@ -1,0 +1,7 @@
+{
+  "id": "custom_021",
+  "description": "Word ladder shortest transformation length (BFS)",
+  "prompt": "Write a Python function `word_ladder_length(begin: str, end: str, word_list: list[str]) -> int` that returns the length (number of words, including begin and end) of the shortest transformation sequence from `begin` to `end`, changing exactly one letter at a time, where every intermediate word must be in `word_list`. Return 0 if no such sequence exists.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_finds_path(self):\n        result = word_ladder_length('hit', 'cog', ['hot','dot','dog','lot','log','cog'])\n        self.assertEqual(result, 5)\n    def test_no_path_end_not_in_list(self):\n        result = word_ladder_length('hit', 'cog', ['hot','dot','dog','lot','log'])\n        self.assertEqual(result, 0)\n    def test_direct_one_letter_change(self):\n        result = word_ladder_length('hit', 'hot', ['hot'])\n        self.assertEqual(result, 2)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

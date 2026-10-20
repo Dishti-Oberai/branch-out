@@ -575,6 +575,11 @@ async def patch(req: PatchRequest, request: Request):
         )
     except KeyError as e:
         raise HTTPException(404, str(e))
+    except ValueError as e:
+        # Phase 9.1: ClarificationFileMismatch is a ValueError subclass --
+        # a clarification that's actually about a different file than
+        # this node, surfaced as a clear 400 instead of a confusing diff.
+        raise HTTPException(400, str(e))
     except LLMGenerationFailed as e:
         raise HTTPException(502, str(e))
     except asyncio.CancelledError:

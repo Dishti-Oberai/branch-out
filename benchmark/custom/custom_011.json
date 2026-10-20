@@ -1,0 +1,7 @@
+{
+  "id": "custom_011",
+  "description": "Trie (prefix tree)",
+  "prompt": "Implement a class `Trie` with `insert(word: str) -> None`, `search(word: str) -> bool` (exact word exists), and `starts_with(prefix: str) -> bool` (any inserted word has this prefix).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_insert_and_search(self):\n        t = Trie()\n        t.insert('apple')\n        self.assertTrue(t.search('apple'))\n        self.assertFalse(t.search('app'))\n    def test_starts_with(self):\n        t = Trie()\n        t.insert('apple')\n        self.assertTrue(t.starts_with('app'))\n        self.assertFalse(t.starts_with('xyz'))\n    def test_multiple_words(self):\n        t = Trie()\n        t.insert('app')\n        t.insert('apple')\n        self.assertTrue(t.search('app'))\n        self.assertTrue(t.search('apple'))\n    def test_empty_trie(self):\n        t = Trie()\n        self.assertFalse(t.search('x'))\n        self.assertFalse(t.starts_with('x'))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

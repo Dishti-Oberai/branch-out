@@ -1,0 +1,7 @@
+{
+  "id": "standard_046",
+  "description": "Palindrome number (no string conversion)",
+  "prompt": "Write a Python function `is_palindrome_number(x: int) -> bool` that returns True if the integer `x` reads the same forwards and backwards, without converting it to a string.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_palindrome(self):\n        self.assertTrue(is_palindrome_number(121))\n    def test_not_palindrome(self):\n        self.assertFalse(is_palindrome_number(123))\n    def test_negative(self):\n        self.assertFalse(is_palindrome_number(-121))\n    def test_single_digit(self):\n        self.assertTrue(is_palindrome_number(7))\n    def test_zero(self):\n        self.assertTrue(is_palindrome_number(0))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

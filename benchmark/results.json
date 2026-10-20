@@ -80,6 +80,326 @@
     "error": null
   },
   {
+    "task_id": "standard_011",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_012",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_013",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_014",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_015",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_016",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_017",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_018",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_019",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_020",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_021",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_022",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_023",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_024",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_025",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_026",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_027",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_028",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_029",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_030",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_031",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 0.3333333333333333,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_032",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_033",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_034",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_035",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_036",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_037",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_038",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_039",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_040",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_041",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_042",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_043",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_044",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_045",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_046",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_047",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_048",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_049",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_050",
+    "category": "standard",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
     "task_id": "custom_001",
     "category": "custom",
     "mode": "baseline-generic",
@@ -113,6 +433,206 @@
   },
   {
     "task_id": "custom_005",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_006",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_007",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_008",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_009",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_010",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_011",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_012",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_013",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_014",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_015",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_016",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_017",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_018",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_019",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_020",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_021",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_022",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_023",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_024",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_025",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_026",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_027",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_028",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_029",
+    "category": "custom",
+    "mode": "baseline-generic",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_030",
     "category": "custom",
     "mode": "baseline-generic",
     "pass_rate": 1.0,
@@ -200,6 +720,326 @@
     "error": null
   },
   {
+    "task_id": "standard_011",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_012",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_013",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_014",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_015",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_016",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_017",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_018",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_019",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_020",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_021",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_022",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_023",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_024",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_025",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_026",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_027",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_028",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_029",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_030",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_031",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_032",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_033",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_034",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_035",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_036",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_037",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_038",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_039",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_040",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_041",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_042",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_043",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_044",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_045",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_046",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_047",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_048",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_049",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_050",
+    "category": "standard",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
     "task_id": "custom_001",
     "category": "custom",
     "mode": "baseline-matched",
@@ -240,6 +1080,206 @@
     "error": null
   },
   {
+    "task_id": "custom_006",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_007",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "custom_008",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_009",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_010",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_011",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_012",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_013",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_014",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "custom_015",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "custom_016",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "custom_017",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_018",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_019",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_020",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_021",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "custom_022",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_023",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_024",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_025",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_026",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_027",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_028",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_029",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_030",
+    "category": "custom",
+    "mode": "baseline-matched",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
     "task_id": "standard_001",
     "category": "standard",
     "mode": "branchout",
@@ -267,8 +1307,8 @@
     "task_id": "standard_004",
     "category": "standard",
     "mode": "branchout",
-    "pass_rate": 1.0,
-    "passed": true,
+    "pass_rate": 0.0,
+    "passed": false,
     "error": null
   },
   {
@@ -320,6 +1360,326 @@
     "error": null
   },
   {
+    "task_id": "standard_011",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_012",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_013",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_014",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_015",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_016",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_017",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_018",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_019",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_020",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_021",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_022",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_023",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_024",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_025",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_026",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_027",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_028",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_029",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_030",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_031",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_032",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_033",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_034",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_035",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_036",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "standard_037",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_038",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_039",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_040",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_041",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_042",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_043",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_044",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_045",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_046",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_047",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_048",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_049",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "standard_050",
+    "category": "standard",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
     "task_id": "custom_001",
     "category": "custom",
     "mode": "branchout",
@@ -353,6 +1713,206 @@
   },
   {
     "task_id": "custom_005",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_006",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 0.0,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "custom_007",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_008",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_009",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_010",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_011",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_012",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_013",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_014",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_015",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_016",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_017",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_018",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_019",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_020",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_021",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_022",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_023",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_024",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_025",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_026",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_027",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_028",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 1.0,
+    "passed": true,
+    "error": null
+  },
+  {
+    "task_id": "custom_029",
+    "category": "custom",
+    "mode": "branchout",
+    "pass_rate": 0.25,
+    "passed": false,
+    "error": null
+  },
+  {
+    "task_id": "custom_030",
     "category": "custom",
     "mode": "branchout",
     "pass_rate": 1.0,

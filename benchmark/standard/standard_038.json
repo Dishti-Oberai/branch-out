@@ -1,0 +1,7 @@
+{
+  "id": "standard_038",
+  "description": "Longest substring without repeating characters",
+  "prompt": "Write a Python function `longest_unique_substring(s: str) -> int` that returns the length of the longest substring of `s` without repeating characters.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(longest_unique_substring('abcabcbb'), 3)\n    def test_all_same(self):\n        self.assertEqual(longest_unique_substring('bbbbb'), 1)\n    def test_empty(self):\n        self.assertEqual(longest_unique_substring(''), 0)\n    def test_no_repeats(self):\n        self.assertEqual(longest_unique_substring('abcdef'), 6)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

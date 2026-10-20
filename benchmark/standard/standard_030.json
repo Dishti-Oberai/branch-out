@@ -1,0 +1,7 @@
+{
+  "id": "standard_030",
+  "description": "Lowest common ancestor in a BST",
+  "prompt": "Write a Python function `lowest_common_ancestor(root, p, q)` that returns the lowest common ancestor node of values `p` and `q` in a binary SEARCH tree (not a general binary tree). Nodes have `.val`, `.left`, `.right`; `p`/`q` are integer values guaranteed to exist in the tree.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_lca_split(self):\n        root = TreeNode(6, TreeNode(2, TreeNode(0), TreeNode(4)), TreeNode(8, TreeNode(7), TreeNode(9)))\n        self.assertEqual(lowest_common_ancestor(root, 2, 8).val, 6)\n    def test_lca_ancestor_is_one_of_them(self):\n        root = TreeNode(6, TreeNode(2, TreeNode(0), TreeNode(4)), TreeNode(8))\n        self.assertEqual(lowest_common_ancestor(root, 2, 4).val, 2)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "custom_026",
+  "description": "LRU cache with TTL expiration combined",
+  "prompt": "Implement a class `LRUTTLCache` with `LRUTTLCache(capacity: int)`, `put(key, value, ttl: float, now: float) -> None`, and `get(key, now: float)` (returns value, or None if missing/expired; a successful get also marks the key as recently used). On put when over capacity, evict the least-recently-used NON-expired key (expired keys are evicted first, regardless of recency, before considering LRU).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_basic_get(self):\n        c = LRUTTLCache(2)\n        c.put('a', 1, ttl=100.0, now=0.0)\n        self.assertEqual(c.get('a', now=5.0), 1)\n    def test_expired_returns_none(self):\n        c = LRUTTLCache(2)\n        c.put('a', 1, ttl=5.0, now=0.0)\n        self.assertIsNone(c.get('a', now=10.0))\n    def test_lru_eviction_over_capacity(self):\n        c = LRUTTLCache(2)\n        c.put('a', 1, ttl=100.0, now=0.0)\n        c.put('b', 2, ttl=100.0, now=0.0)\n        c.get('a', now=1.0)\n        c.put('c', 3, ttl=100.0, now=2.0)\n        self.assertIsNone(c.get('b', now=3.0))\n        self.assertEqual(c.get('a', now=3.0), 1)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

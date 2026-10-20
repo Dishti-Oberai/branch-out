@@ -1,0 +1,7 @@
+{
+  "id": "custom_029",
+  "description": "Vending machine state machine",
+  "prompt": "Implement a class `VendingMachine` with `price: int` set at construction (`VendingMachine(price)`), `insert_coin(amount: int) -> None` (accumulates `balance`), `select_item() -> str` (returns 'dispensed' and resets balance to 0 if `balance >= price`, else returns 'insufficient funds' and does not reset balance), and `refund() -> int` (returns the current balance and resets it to 0).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_dispenses_with_enough_balance(self):\n        v = VendingMachine(100)\n        v.insert_coin(100)\n        self.assertEqual(v.select_item(), 'dispensed')\n    def test_insufficient_funds(self):\n        v = VendingMachine(100)\n        v.insert_coin(50)\n        self.assertEqual(v.select_item(), 'insufficient funds')\n        self.assertEqual(v.balance, 50)\n    def test_refund(self):\n        v = VendingMachine(100)\n        v.insert_coin(60)\n        self.assertEqual(v.refund(), 60)\n        self.assertEqual(v.balance, 0)\n    def test_balance_resets_after_dispense(self):\n        v = VendingMachine(100)\n        v.insert_coin(150)\n        v.select_item()\n        self.assertEqual(v.balance, 0)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

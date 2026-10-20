@@ -1,0 +1,7 @@
+{
+  "id": "custom_019",
+  "description": "Observer pattern with multiple subscribers",
+  "prompt": "Implement a class `Subject` with `attach(observer) -> None`, `detach(observer) -> None`, and `notify(data) -> None` which calls `observer.update(data)` on every attached observer, in attachment order.",
+  "test_suite": "import unittest\n\nclass FakeObserver:\n    def __init__(self):\n        self.received = []\n    def update(self, data):\n        self.received.append(data)\n\nclass Test(unittest.TestCase):\n    def test_notifies_all_observers(self):\n        subject = Subject()\n        o1, o2 = FakeObserver(), FakeObserver()\n        subject.attach(o1)\n        subject.attach(o2)\n        subject.notify('event')\n        self.assertEqual(o1.received, ['event'])\n        self.assertEqual(o2.received, ['event'])\n    def test_detach_stops_notifications(self):\n        subject = Subject()\n        o1 = FakeObserver()\n        subject.attach(o1)\n        subject.detach(o1)\n        subject.notify('event')\n        self.assertEqual(o1.received, [])\n    def test_no_observers(self):\n        subject = Subject()\n        subject.notify('event')\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

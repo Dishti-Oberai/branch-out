@@ -1,0 +1,7 @@
+{
+  "id": "standard_018",
+  "description": "Climbing stairs (count distinct ways)",
+  "prompt": "Write a Python function `climb_stairs(n: int) -> int` that returns the number of distinct ways to climb `n` stairs, taking either 1 or 2 steps at a time.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_one(self):\n        self.assertEqual(climb_stairs(1), 1)\n    def test_two(self):\n        self.assertEqual(climb_stairs(2), 2)\n    def test_five(self):\n        self.assertEqual(climb_stairs(5), 8)\n    def test_ten(self):\n        self.assertEqual(climb_stairs(10), 89)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "custom_009",
+  "description": "Throttle gate (time-based, simulated clock, leading edge)",
+  "prompt": "Implement a class `Throttler` with `Throttler(interval: float)` and a method `allow(now: float) -> bool` that returns True if this call should be allowed to proceed (leading-edge throttle: allow immediately, then suppress every subsequent call until `interval` seconds have passed since the last ALLOWED call).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_first_call_allowed(self):\n        t = Throttler(5.0)\n        self.assertTrue(t.allow(0.0))\n    def test_second_call_within_interval_blocked(self):\n        t = Throttler(5.0)\n        t.allow(0.0)\n        self.assertFalse(t.allow(2.0))\n    def test_call_after_interval_allowed(self):\n        t = Throttler(5.0)\n        t.allow(0.0)\n        self.assertTrue(t.allow(5.0))\n    def test_multiple_blocked_calls(self):\n        t = Throttler(5.0)\n        t.allow(0.0)\n        t.allow(1.0)\n        t.allow(2.0)\n        self.assertTrue(t.allow(6.0))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

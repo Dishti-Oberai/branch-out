@@ -1,0 +1,7 @@
+{
+  "id": "custom_020",
+  "description": "Order processing state machine",
+  "prompt": "Implement a class `Order` with states PENDING -> SHIPPED -> DELIVERED (and PENDING -> CANCELLED). Methods `ship()`, `deliver()`, `cancel()` each either transition state or raise `ValueError` if the transition is invalid from the current state. `state` attribute starts as `'PENDING'`. Valid transitions: PENDING->SHIPPED (ship), PENDING->CANCELLED (cancel), SHIPPED->DELIVERED (deliver). No other transitions are valid.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_happy_path(self):\n        o = Order()\n        o.ship()\n        self.assertEqual(o.state, 'SHIPPED')\n        o.deliver()\n        self.assertEqual(o.state, 'DELIVERED')\n    def test_cancel_from_pending(self):\n        o = Order()\n        o.cancel()\n        self.assertEqual(o.state, 'CANCELLED')\n    def test_cannot_deliver_before_ship(self):\n        o = Order()\n        with self.assertRaises(ValueError):\n            o.deliver()\n    def test_cannot_cancel_after_shipped(self):\n        o = Order()\n        o.ship()\n        with self.assertRaises(ValueError):\n            o.cancel()\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "custom_007",
+  "description": "Circular (ring) buffer",
+  "prompt": "Implement a class `CircularBuffer` with `CircularBuffer(capacity: int)`, `write(item) -> bool` (returns False if full, True if written), `read() -> item or None` (returns None if empty, else the oldest unread item, FIFO order), and `is_full()`/`is_empty()`.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_fifo_order(self):\n        b = CircularBuffer(3)\n        b.write(1); b.write(2); b.write(3)\n        self.assertEqual(b.read(), 1)\n        self.assertEqual(b.read(), 2)\n    def test_full_rejects_write(self):\n        b = CircularBuffer(2)\n        b.write(1); b.write(2)\n        self.assertFalse(b.write(3))\n    def test_wraps_around(self):\n        b = CircularBuffer(2)\n        b.write(1); b.write(2)\n        b.read()\n        self.assertTrue(b.write(3))\n        self.assertEqual(b.read(), 2)\n        self.assertEqual(b.read(), 3)\n    def test_empty_read(self):\n        b = CircularBuffer(2)\n        self.assertIsNone(b.read())\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

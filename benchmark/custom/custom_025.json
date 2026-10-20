@@ -1,0 +1,7 @@
+{
+  "id": "custom_025",
+  "description": "Simplified Bloom filter (fixed-size bit array, 2 hash functions)",
+  "prompt": "Implement a class `BloomFilter` with `BloomFilter(size: int)`, `add(item: str) -> None`, and `might_contain(item: str) -> bool` (False means definitely not present; True means maybe present). Use two simple, deterministic hash functions (e.g. based on `hash(item)` with different seeds/salts) mapping into a bit array of length `size`.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_added_item_might_contain(self):\n        bf = BloomFilter(100)\n        bf.add('hello')\n        self.assertTrue(bf.might_contain('hello'))\n    def test_never_added_likely_absent(self):\n        bf = BloomFilter(1000)\n        bf.add('hello')\n        self.assertFalse(bf.might_contain('completely_different_string_xyz'))\n    def test_empty_filter(self):\n        bf = BloomFilter(100)\n        self.assertFalse(bf.might_contain('anything'))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

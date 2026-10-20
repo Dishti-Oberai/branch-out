@@ -1,0 +1,7 @@
+{
+  "id": "standard_016",
+  "description": "Rotate array to the right by k steps",
+  "prompt": "Write a Python function `rotate_array(nums: list[int], k: int) -> list[int]` that returns a new list with `nums` rotated to the right by `k` steps (`k` can be >= len(nums)).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(rotate_array([1,2,3,4,5,6,7], 3), [5,6,7,1,2,3,4])\n    def test_k_equals_length(self):\n        self.assertEqual(rotate_array([1,2,3], 3), [1,2,3])\n    def test_k_larger_than_length(self):\n        self.assertEqual(rotate_array([1,2,3], 4), [3,1,2])\n    def test_empty(self):\n        self.assertEqual(rotate_array([], 5), [])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

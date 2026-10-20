@@ -1,0 +1,7 @@
+{
+  "id": "standard_026",
+  "description": "Rotate matrix 90 degrees clockwise",
+  "prompt": "Write a Python function `rotate_matrix(matrix: list[list[int]]) -> list[list[int]]` that returns a new NxN matrix rotated 90 degrees clockwise.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_3x3(self):\n        m = [[1,2,3],[4,5,6],[7,8,9]]\n        self.assertEqual(rotate_matrix(m), [[7,4,1],[8,5,2],[9,6,3]])\n    def test_2x2(self):\n        self.assertEqual(rotate_matrix([[1,2],[3,4]]), [[3,1],[4,2]])\n    def test_1x1(self):\n        self.assertEqual(rotate_matrix([[1]]), [[1]])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

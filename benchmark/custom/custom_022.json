@@ -1,0 +1,7 @@
+{
+  "id": "custom_022",
+  "description": "Flatten a nested dict with a custom separator",
+  "prompt": "Write a Python function `flatten_dict(d: dict, sep: str = '.') -> dict` that flattens a nested dictionary into a single-level dict, joining nested keys with `sep` (e.g. `{'a': {'b': 1}}` with sep='.' -> `{'a.b': 1}`). Non-dict values (including lists) are left as-is, not recursed into.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_simple_nesting(self):\n        self.assertEqual(flatten_dict({'a': {'b': 1}}), {'a.b': 1})\n    def test_deep_nesting(self):\n        self.assertEqual(flatten_dict({'a': {'b': {'c': 2}}}), {'a.b.c': 2})\n    def test_custom_separator(self):\n        self.assertEqual(flatten_dict({'a': {'b': 1}}, sep='_'), {'a_b': 1})\n    def test_list_not_recursed(self):\n        self.assertEqual(flatten_dict({'a': [1, 2]}), {'a': [1, 2]})\n    def test_flat_already(self):\n        self.assertEqual(flatten_dict({'a': 1, 'b': 2}), {'a': 1, 'b': 2})\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

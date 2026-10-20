@@ -1,0 +1,7 @@
+{
+  "id": "standard_048",
+  "description": "Single number (appears once, rest appear twice)",
+  "prompt": "Write a Python function `single_number(nums: list[int]) -> int` that, given a list where every element appears exactly twice except one which appears exactly once, returns that single element, using O(n) time and O(1) extra space (XOR trick).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(single_number([2,2,1]), 1)\n    def test_longer(self):\n        self.assertEqual(single_number([4,1,2,1,2]), 4)\n    def test_single_element(self):\n        self.assertEqual(single_number([7]), 7)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

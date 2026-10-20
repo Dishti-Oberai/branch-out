@@ -1,0 +1,7 @@
+{
+  "id": "standard_013",
+  "description": "Valid palindrome (alphanumeric only)",
+  "prompt": "Write a Python function `is_palindrome(s: str) -> bool` that returns True if `s` is a palindrome when considering only alphanumeric characters and ignoring case.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_simple_palindrome(self):\n        self.assertTrue(is_palindrome('racecar'))\n    def test_with_punctuation(self):\n        self.assertTrue(is_palindrome('A man, a plan, a canal: Panama'))\n    def test_not_palindrome(self):\n        self.assertFalse(is_palindrome('hello'))\n    def test_empty(self):\n        self.assertTrue(is_palindrome(''))\n    def test_single_char(self):\n        self.assertTrue(is_palindrome('a'))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "standard_023",
+  "description": "String compression (run-length encoding)",
+  "prompt": "Write a Python function `compress(s: str) -> str` that run-length-encodes `s` (e.g. 'aaabbc' -> 'a3b2c1'); a character appearing once is still followed by '1'. Return '' for an empty string.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_repeats(self):\n        self.assertEqual(compress('aaabbc'), 'a3b2c1')\n    def test_no_repeats(self):\n        self.assertEqual(compress('abc'), 'a1b1c1')\n    def test_empty(self):\n        self.assertEqual(compress(''), '')\n    def test_single_char(self):\n        self.assertEqual(compress('aaaa'), 'a4')\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

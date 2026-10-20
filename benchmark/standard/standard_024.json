@@ -1,0 +1,7 @@
+{
+  "id": "standard_024",
+  "description": "Flatten a nested list",
+  "prompt": "Write a Python function `flatten(nested: list) -> list` that flattens an arbitrarily nested list of integers into a single flat list, preserving order.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_nested(self):\n        self.assertEqual(flatten([1, [2, 3], [4, [5, 6]]]), [1,2,3,4,5,6])\n    def test_flat_already(self):\n        self.assertEqual(flatten([1,2,3]), [1,2,3])\n    def test_empty(self):\n        self.assertEqual(flatten([]), [])\n    def test_deeply_nested(self):\n        self.assertEqual(flatten([[[[1]]]]), [1])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

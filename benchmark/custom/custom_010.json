@@ -1,0 +1,7 @@
+{
+  "id": "custom_010",
+  "description": "Simple pub-sub event emitter",
+  "prompt": "Implement a class `EventEmitter` with `subscribe(event: str, callback) -> None`, `unsubscribe(event: str, callback) -> None`, and `emit(event: str, *args) -> None` that calls every subscribed callback for `event` with `*args`, in subscription order. Emitting an event with no subscribers does nothing (no error).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_calls_subscribers_in_order(self):\n        calls = []\n        e = EventEmitter()\n        e.subscribe('x', lambda v: calls.append(('a', v)))\n        e.subscribe('x', lambda v: calls.append(('b', v)))\n        e.emit('x', 1)\n        self.assertEqual(calls, [('a', 1), ('b', 1)])\n    def test_unsubscribe_stops_calls(self):\n        calls = []\n        e = EventEmitter()\n        def cb(v): calls.append(v)\n        e.subscribe('x', cb)\n        e.unsubscribe('x', cb)\n        e.emit('x', 1)\n        self.assertEqual(calls, [])\n    def test_emit_with_no_subscribers(self):\n        e = EventEmitter()\n        e.emit('nothing')\n    def test_different_events_isolated(self):\n        calls = []\n        e = EventEmitter()\n        e.subscribe('x', lambda: calls.append('x'))\n        e.subscribe('y', lambda: calls.append('y'))\n        e.emit('x')\n        self.assertEqual(calls, ['x'])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

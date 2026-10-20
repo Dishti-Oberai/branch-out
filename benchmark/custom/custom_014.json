@@ -1,0 +1,7 @@
+{
+  "id": "custom_014",
+  "description": "BFS shortest path in an unweighted graph",
+  "prompt": "Write a Python function `shortest_path(graph: dict, start, end) -> list` that returns the shortest path (list of nodes, inclusive of start and end) from `start` to `end` in an unweighted undirected graph given as an adjacency dict `{node: [neighbors]}`. Return `[]` if no path exists.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_simple_path(self):\n        graph = {'A': ['B', 'C'], 'B': ['D'], 'C': ['D'], 'D': []}\n        path = shortest_path(graph, 'A', 'D')\n        self.assertEqual(len(path), 3)\n        self.assertEqual(path[0], 'A')\n        self.assertEqual(path[-1], 'D')\n    def test_same_start_end(self):\n        graph = {'A': ['B']}\n        self.assertEqual(shortest_path(graph, 'A', 'A'), ['A'])\n    def test_no_path(self):\n        graph = {'A': ['B'], 'B': [], 'C': []}\n        self.assertEqual(shortest_path(graph, 'A', 'C'), [])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

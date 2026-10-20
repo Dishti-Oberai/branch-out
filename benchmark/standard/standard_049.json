@@ -1,0 +1,7 @@
+{
+  "id": "standard_049",
+  "description": "Majority element (appears more than n/2 times)",
+  "prompt": "Write a Python function `majority_element(nums: list[int]) -> int` that returns the element appearing more than n/2 times in `nums` (guaranteed to exist), using Boyer-Moore voting in O(n) time and O(1) space.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_basic(self):\n        self.assertEqual(majority_element([3,2,3]), 3)\n    def test_longer(self):\n        self.assertEqual(majority_element([2,2,1,1,1,2,2]), 2)\n    def test_single_element(self):\n        self.assertEqual(majority_element([1]), 1)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

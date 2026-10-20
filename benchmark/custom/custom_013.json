@@ -1,0 +1,7 @@
+{
+  "id": "custom_013",
+  "description": "Priority queue (min-heap) from scratch",
+  "prompt": "Implement a class `MinHeap` (no `heapq`) with `push(val: int) -> None`, `pop() -> int` (removes and returns the smallest value; raises `IndexError` if empty), and `peek() -> int` (smallest value without removing; raises `IndexError` if empty).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_pops_in_sorted_order(self):\n        h = MinHeap()\n        for v in [5, 3, 8, 1, 2]:\n            h.push(v)\n        result = [h.pop() for _ in range(5)]\n        self.assertEqual(result, [1, 2, 3, 5, 8])\n    def test_peek_does_not_remove(self):\n        h = MinHeap()\n        h.push(3)\n        h.push(1)\n        self.assertEqual(h.peek(), 1)\n        self.assertEqual(h.peek(), 1)\n    def test_pop_empty_raises(self):\n        h = MinHeap()\n        with self.assertRaises(IndexError):\n            h.pop()\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "standard_041",
+  "description": "Spiral matrix traversal",
+  "prompt": "Write a Python function `spiral_order(matrix: list[list[int]]) -> list[int]` that returns all elements of a matrix in clockwise spiral order, starting from the top-left.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_3x3(self):\n        m = [[1,2,3],[4,5,6],[7,8,9]]\n        self.assertEqual(spiral_order(m), [1,2,3,6,9,8,7,4,5])\n    def test_rectangular(self):\n        m = [[1,2,3,4],[5,6,7,8],[9,10,11,12]]\n        self.assertEqual(spiral_order(m), [1,2,3,4,8,12,11,10,9,5,6,7])\n    def test_empty(self):\n        self.assertEqual(spiral_order([]), [])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "standard_044",
+  "description": "Integer to Roman numeral",
+  "prompt": "Write a Python function `int_to_roman(num: int) -> str` that converts an integer (1-3999) to a Roman numeral string, using standard subtractive notation.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_simple(self):\n        self.assertEqual(int_to_roman(3), 'III')\n    def test_subtractive(self):\n        self.assertEqual(int_to_roman(4), 'IV')\n        self.assertEqual(int_to_roman(9), 'IX')\n    def test_complex(self):\n        self.assertEqual(int_to_roman(1994), 'MCMXCIV')\n    def test_fifty_eight(self):\n        self.assertEqual(int_to_roman(58), 'LVIII')\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

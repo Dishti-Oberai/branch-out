@@ -37,11 +37,18 @@ export default function App() {
   const [nodeCountWarningDismissed, setNodeCountWarningDismissed] = useState(false);
   const { branch } = tree;
 
-  // Orphaned nodes revive on click (backtrack there); everything else just opens the inspector.
+  // Every click activates the node: opens the inspector AND backtracks there,
+  // so the real file on disk reflects whichever node is currently clicked
+  // (matches CLAUDE.md's "activating a node writes straight to the real
+  // file" contract) and the backend's "active" node — which /continue and
+  // the VS Code "Ask about selection" command both key off — always matches
+  // what's actually selected in the tree panel. Previously only orphaned
+  // nodes backtracked on click; a plain click on a fresh sibling branch left
+  // the backend's active node unchanged, so neither the file nor a
+  // follow-up continue reflected the node the user had just clicked.
   const select = useCallback((id: string) => {
     tree.select(id);
-    const node = tree.nodes.find((n) => n.id === id);
-    if (node?.status === "orphaned") tree.backtrack(id);
+    tree.backtrack(id);
   }, [tree]);
 
   // Explore alternatives: select that node so its inspector opens; if a

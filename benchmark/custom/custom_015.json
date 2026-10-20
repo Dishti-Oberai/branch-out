@@ -1,0 +1,7 @@
+{
+  "id": "custom_015",
+  "description": "Cycle detection in a directed graph (DFS)",
+  "prompt": "Write a Python function `has_cycle(graph: dict) -> bool` that returns True if a directed graph (adjacency dict `{node: [neighbors]}`) contains a cycle, using DFS with recursion-stack tracking.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_has_cycle(self):\n        graph = {'A': ['B'], 'B': ['C'], 'C': ['A']}\n        self.assertTrue(has_cycle(graph))\n    def test_no_cycle(self):\n        graph = {'A': ['B'], 'B': ['C'], 'C': []}\n        self.assertFalse(has_cycle(graph))\n    def test_disconnected_no_cycle(self):\n        graph = {'A': ['B'], 'B': [], 'C': ['D'], 'D': []}\n        self.assertFalse(has_cycle(graph))\n    def test_self_loop(self):\n        graph = {'A': ['A']}\n        self.assertTrue(has_cycle(graph))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

@@ -31,11 +31,11 @@ test("branch, pick, backtrack, save, reload — the core tree milestone", async 
   // Pick one of the 3 new branches — index `start` (0-indexed), the first
   // newly-appended node. NOT `.bo-node.normal` generically: that class
   // also matches Root whenever it isn't currently the active node.
+  // A plain click now activates the node directly (backtracks there) so the
+  // real file and the backend's "active" node always match whatever's
+  // selected in the tree panel — no separate "Make active" step needed.
   await page.locator(".bo-node").nth(start).click();
   await expect(page.locator(".inspector")).toBeVisible();
-
-  // "Make active" backtracks the tree's cursor onto it.
-  await page.getByRole("button", { name: /Make active/ }).click();
   await expect(page.locator(".bo-node.active")).toHaveCount(1);
 
   // Ask a single follow-up (not a branch) — exactly one new node appears.
@@ -45,8 +45,19 @@ test("branch, pick, backtrack, save, reload — the core tree milestone", async 
   await page.locator(".prompt-bar").getByRole("button", { name: "Ask", exact: true }).click();
   await expect(page.locator(".bo-node")).toHaveCount(start + 4, { timeout: 10_000 });
 
-  // Backtrack to root: the whole branch becomes orphaned (dashed/dim).
-  await page.locator(".bo-node").filter({ hasText: "Root" }).click();
+  // Backtrack: activating a different (already-dimmed) sibling swaps which
+  // subtree is orphaned. NOT backtracking to the literal Root node here --
+  // that's a real, intentional edge case (see orchestrator.py's backtrack()
+  // docstring) where NOTHING ever gets orphaned, since root's own
+  // descendants are the entire rest of the tree, so nothing is ever "off
+  // path" from it. The previous version of this test clicked Root and
+  // asserted an orphaned node appeared anyway -- it only ever passed by
+  // catching a stale pre-refresh DOM frame (a race), not real post-refresh
+  // state; confirmed by fetching /session directly right after the click
+  // and finding every non-root node back to "normal". A real sibling click
+  // is both the correct fix and the more representative "switch branches" demo.
+  await page.locator(".bo-node.orphaned").filter({ hasText: "Branch" }).first().click();
+  await expect(page.locator(".bo-node.active")).toHaveCount(1);
   await expect(page.locator(".bo-node.orphaned").first()).toBeVisible();
 
   // Save succeeds (no error banner), and the backend session persists

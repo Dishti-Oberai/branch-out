@@ -1,0 +1,7 @@
+{
+  "id": "custom_023",
+  "description": "Command pattern with undo",
+  "prompt": "Implement a class `TextEditor` with `text` attribute starting as `''`, method `execute(command)` where `command` is an object with `.do(editor)` and `.undo(editor)` methods, and `undo_last()` which undoes the most recently executed command (no-op if none). Provide a simple `AppendCommand(text_to_append)` class with `.do`/`.undo` implementing append/remove-that-suffix.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_execute_appends(self):\n        e = TextEditor()\n        e.execute(AppendCommand('hello'))\n        self.assertEqual(e.text, 'hello')\n    def test_undo_reverts(self):\n        e = TextEditor()\n        e.execute(AppendCommand('hello'))\n        e.execute(AppendCommand(' world'))\n        e.undo_last()\n        self.assertEqual(e.text, 'hello')\n    def test_undo_with_no_history(self):\n        e = TextEditor()\n        e.undo_last()\n        self.assertEqual(e.text, '')\n    def test_multiple_undos(self):\n        e = TextEditor()\n        e.execute(AppendCommand('a'))\n        e.execute(AppendCommand('b'))\n        e.undo_last()\n        e.undo_last()\n        self.assertEqual(e.text, '')\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

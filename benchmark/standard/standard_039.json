@@ -1,0 +1,7 @@
+{
+  "id": "standard_039",
+  "description": "Group anagrams",
+  "prompt": "Write a Python function `group_anagrams(words: list[str]) -> list[list[str]]` that groups words that are anagrams of each other. Each group's words should be in their original relative order; groups can be returned in any order.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_groups(self):\n        result = group_anagrams(['eat','tea','tan','ate','nat','bat'])\n        groups_as_sets = sorted([sorted(g) for g in result])\n        expected = sorted([sorted(g) for g in [['eat','tea','ate'],['tan','nat'],['bat']]])\n        self.assertEqual(groups_as_sets, expected)\n    def test_empty(self):\n        self.assertEqual(group_anagrams([]), [])\n    def test_no_anagrams(self):\n        result = group_anagrams(['abc', 'def'])\n        self.assertEqual(len(result), 2)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

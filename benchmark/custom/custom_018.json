@@ -1,0 +1,7 @@
+{
+  "id": "custom_018",
+  "description": "In-memory key-value store with TTL expiration",
+  "prompt": "Implement a class `TTLStore` with `set(key, value, ttl: float, now: float) -> None` (expires at `now + ttl`), `get(key, now: float)` (returns the value, or `None` if missing or expired as of `now`), using a simulated clock (`now` passed explicitly, no real time).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_get_before_expiry(self):\n        s = TTLStore()\n        s.set('a', 1, ttl=10.0, now=0.0)\n        self.assertEqual(s.get('a', now=5.0), 1)\n    def test_get_after_expiry(self):\n        s = TTLStore()\n        s.set('a', 1, ttl=10.0, now=0.0)\n        self.assertIsNone(s.get('a', now=10.0))\n    def test_missing_key(self):\n        s = TTLStore()\n        self.assertIsNone(s.get('nope', now=0.0))\n    def test_overwrite_resets_ttl(self):\n        s = TTLStore()\n        s.set('a', 1, ttl=5.0, now=0.0)\n        s.set('a', 2, ttl=5.0, now=3.0)\n        self.assertEqual(s.get('a', now=7.0), 2)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

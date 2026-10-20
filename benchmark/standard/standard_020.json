@@ -1,0 +1,7 @@
+{
+  "id": "standard_020",
+  "description": "Fast exponentiation (power function)",
+  "prompt": "Write a Python function `my_pow(base: float, exp: int) -> float` that computes `base ** exp` without using the built-in `**` or `pow()`, handling negative exponents, in O(log n) time.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_positive(self):\n        self.assertAlmostEqual(my_pow(2.0, 10), 1024.0)\n    def test_negative_exp(self):\n        self.assertAlmostEqual(my_pow(2.0, -2), 0.25)\n    def test_zero_exp(self):\n        self.assertAlmostEqual(my_pow(5.0, 0), 1.0)\n    def test_one_base(self):\n        self.assertAlmostEqual(my_pow(1.0, 1000), 1.0)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

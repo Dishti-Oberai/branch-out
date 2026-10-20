@@ -1,0 +1,7 @@
+{
+  "id": "standard_011",
+  "description": "Reverse a linked list",
+  "prompt": "Write a Python function `reverse_linked_list(head)` that reverses a singly linked list and returns the new head. Each node has `.val` and `.next` attributes. Use this `Node` class:\n```python\nclass Node:\n    def __init__(self, val, next=None):\n        self.val = val\n        self.next = next\n```",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def to_list(self, head):\n        out = []\n        while head:\n            out.append(head.val)\n            head = head.next\n        return out\n    def test_reverses(self):\n        n3 = Node(3)\n        n2 = Node(2, n3)\n        n1 = Node(1, n2)\n        self.assertEqual(self.to_list(reverse_linked_list(n1)), [3, 2, 1])\n    def test_single_node(self):\n        n = Node(5)\n        self.assertEqual(self.to_list(reverse_linked_list(n)), [5])\n    def test_empty(self):\n        self.assertEqual(self.to_list(reverse_linked_list(None)), [])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "standard_029",
+  "description": "Balanced binary tree check",
+  "prompt": "Write a Python function `is_balanced(root) -> bool` that returns True if a binary tree is height-balanced (for every node, the height difference between left and right subtrees is at most 1). Nodes have `.val`, `.left`, `.right`.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_empty(self):\n        self.assertTrue(is_balanced(None))\n    def test_balanced(self):\n        root = TreeNode(1, TreeNode(2), TreeNode(3))\n        self.assertTrue(is_balanced(root))\n    def test_unbalanced(self):\n        root = TreeNode(1, TreeNode(2, TreeNode(3, TreeNode(4))))\n        self.assertFalse(is_balanced(root))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

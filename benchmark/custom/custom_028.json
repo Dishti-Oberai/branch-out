@@ -1,0 +1,7 @@
+{
+  "id": "custom_028",
+  "description": "Single-threaded producer-consumer queue simulation",
+  "prompt": "Implement a class `BoundedQueue` with `BoundedQueue(capacity: int)`, `enqueue(item) -> bool` (returns False if full, else adds and returns True), `dequeue() -> item or None` (returns None if empty, else removes and returns the oldest item, FIFO), and `size() -> int`.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_fifo_order(self):\n        q = BoundedQueue(5)\n        q.enqueue(1); q.enqueue(2); q.enqueue(3)\n        self.assertEqual(q.dequeue(), 1)\n        self.assertEqual(q.dequeue(), 2)\n    def test_full_queue_rejects(self):\n        q = BoundedQueue(2)\n        q.enqueue(1); q.enqueue(2)\n        self.assertFalse(q.enqueue(3))\n    def test_empty_dequeue(self):\n        q = BoundedQueue(2)\n        self.assertIsNone(q.dequeue())\n    def test_size_tracks_correctly(self):\n        q = BoundedQueue(5)\n        q.enqueue(1); q.enqueue(2)\n        q.dequeue()\n        self.assertEqual(q.size(), 1)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from orchestrator import LLMGenerationFailed, Orchestrator
+from orchestrator import ClarificationFileMismatch, LLMGenerationFailed, Orchestrator
 from tests.conftest import FakeLLM
 
 
@@ -724,6 +724,55 @@ def _add_query(o, node_id, question, answer, entry_id="q1"):
     o.tree.add_query_entry(node_id, models.QueryEntry(
         id=entry_id, question=question, answer=answer, timestamp=datetime.utcnow(),
     ))
+
+
+def test_patch_raises_clear_error_when_clarification_is_about_a_different_file():
+    # Real bug, reported by the user (2026-10-19): a clarification Q&A
+    # that's actually about a different file than `source` used to be
+    # incorporated anyway, producing a nonsense diff and a bogus conflict
+    # banner. Now fails clearly instead -- source is "about" main.py, but
+    # the model's own response says the clarification concerns
+    # unrelated.py (a real, known, different file).
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "x", "reasoning": "r", "is_code_change": True, "target_file": "unrelated.py",
+    }))
+    o = Orchestrator(llm)
+    _add_node(o, "source", "root", code_snapshot="line1\nline2\n", target_file="main.py",
+              codebase_context=_multi_file_snapshot())
+    _add_node(o, "target", "root", code_snapshot="line1\nline2\n")
+    _add_query(o, "source", "change something in unrelated.py", "sure, here's the change")
+
+    with pytest.raises(ClarificationFileMismatch):
+        asyncio.run(o.patch("source", "q1", "target"))
+
+
+def test_patch_proceeds_normally_when_clarification_declares_the_same_file():
+    llm = FakeLLM(response_fn=lambda i: json.dumps({
+        "code": "line1\nCHANGED\n", "reasoning": "r", "is_code_change": True, "target_file": "main.py",
+    }))
+    o = Orchestrator(llm)
+    _add_node(o, "source", "root", code_snapshot="line1\nline2\n", target_file="main.py",
+              codebase_context=_multi_file_snapshot())
+    _add_node(o, "target", "root", code_snapshot="line1\nline2\n")
+    _add_query(o, "source", "what should line2 be?", "it should say CHANGED")
+
+    outcome = asyncio.run(o.patch("source", "q1", "target"))
+    assert outcome.conflict is False
+    assert outcome.node.code_snapshot == "line1\nCHANGED\n"
+
+
+def test_patch_proceeds_normally_when_source_has_no_target_file_at_all():
+    # No target_file on source at all -> nothing to mismatch against;
+    # the mismatch check must not somehow block the normal, file-less case.
+    llm = FakeLLM(response_fn=lambda i: '{"code": "line1\\nCHANGED\\n", "reasoning": "applied it"}')
+    o = Orchestrator(llm)
+    _add_node(o, "source", "root", code_snapshot="line1\nline2\n")
+    _add_node(o, "target", "root", code_snapshot="line1\nline2\n")
+    _add_query(o, "source", "what should line2 be?", "it should say CHANGED")
+
+    outcome = asyncio.run(o.patch("source", "q1", "target"))
+    assert outcome.conflict is False
+    assert outcome.node.code_snapshot == "line1\nCHANGED\n"
 
 
 def test_patch_applies_cleanly_and_creates_a_new_active_child():

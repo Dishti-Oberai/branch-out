@@ -1,0 +1,7 @@
+{
+  "id": "custom_012",
+  "description": "Union-Find (disjoint set) with path compression",
+  "prompt": "Implement a class `UnionFind` with `UnionFind(n: int)` (n elements, 0 to n-1, each its own set initially), `union(a: int, b: int) -> None` (merges the sets containing a and b), and `connected(a: int, b: int) -> bool` (True if a and b are in the same set).",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_initially_disconnected(self):\n        uf = UnionFind(5)\n        self.assertFalse(uf.connected(0, 1))\n    def test_union_connects(self):\n        uf = UnionFind(5)\n        uf.union(0, 1)\n        self.assertTrue(uf.connected(0, 1))\n    def test_transitive_connection(self):\n        uf = UnionFind(5)\n        uf.union(0, 1)\n        uf.union(1, 2)\n        self.assertTrue(uf.connected(0, 2))\n    def test_self_connected(self):\n        uf = UnionFind(3)\n        self.assertTrue(uf.connected(0, 0))\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

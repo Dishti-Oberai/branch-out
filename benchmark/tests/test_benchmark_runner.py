@@ -9,10 +9,13 @@ from runner import TaskResult, _extract_code, load_tasks, summarize  # noqa: E40
 
 
 def test_load_tasks_finds_all_real_task_files():
+    # Expanded from 15 (10 standard + 5 custom) to the full 80 (50 + 30),
+    # per the 2026-10-20 decision to revisit the locked set once the rest
+    # of the implementation was complete.
     tasks = load_tasks()
-    assert len(tasks) == 15
-    assert sum(1 for t in tasks if t.category == "standard") == 10
-    assert sum(1 for t in tasks if t.category == "custom") == 5
+    assert len(tasks) == 80
+    assert sum(1 for t in tasks if t.category == "standard") == 50
+    assert sum(1 for t in tasks if t.category == "custom") == 30
     assert len({t.id for t in tasks}) == len(tasks)  # no duplicate ids
 
 

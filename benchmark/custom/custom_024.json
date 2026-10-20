@@ -1,0 +1,7 @@
+{
+  "id": "custom_024",
+  "description": "Round-robin load balancer",
+  "prompt": "Implement a class `RoundRobinBalancer` with `RoundRobinBalancer(servers: list[str])` and a method `next() -> str` that returns servers in strict round-robin order, cycling back to the start after the last one. Raise `ValueError` if constructed with an empty server list.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_cycles_through_servers(self):\n        b = RoundRobinBalancer(['a', 'b', 'c'])\n        result = [b.next() for _ in range(5)]\n        self.assertEqual(result, ['a', 'b', 'c', 'a', 'b'])\n    def test_single_server(self):\n        b = RoundRobinBalancer(['only'])\n        self.assertEqual(b.next(), 'only')\n        self.assertEqual(b.next(), 'only')\n    def test_empty_list_raises(self):\n        with self.assertRaises(ValueError):\n            RoundRobinBalancer([])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

@@ -274,6 +274,16 @@ class LLMGenerationFailed(RuntimeError):
     """
 
 
+class ClarificationFileMismatch(ValueError):
+    """Phase 9.1 (2026-10-19): a clarification being `/patch`'d is actually
+    about a different file than the node it's being incorporated into --
+    see `_incorporate_clarification`'s own docstring for the full "why
+    this can't just redirect like continue_from/branch do" rationale.
+    `ValueError` subclass -> the API layer surfaces this as a clear 400,
+    same pattern `merge_siblings`'s own `ValueError`s already use.
+    """
+
+
 class Orchestrator:
     """Turn loop: branch from any node, backtrack to any node, continue linearly.
 
@@ -540,11 +550,31 @@ class Orchestrator:
         return entry
 
     async def _incorporate_clarification(self, source: TreeNode, entry: QueryEntry) -> Branch:
-        """Shared by `patch()` and `merge()`: one LLM call that revises
-        `source`'s code to incorporate a clarification (a Q&A pair from its
-        own `query_history`). Reuses `generate_branches` (beam_width=1) for
-        its existing JSON {code, reasoning} parsing rather than a second,
+        """Used by `patch()`: one LLM call that revises `source`'s code to
+        incorporate a clarification (a Q&A pair from its own
+        `query_history`). Reuses `generate_branches` (beam_width=1) for its
+        existing JSON {code, reasoning} parsing rather than a second,
         separately-parsed call shape.
+
+        Real bug, reported by the user (2026-10-19): a clarification Q&A
+        that's actually about a DIFFERENT file than `source.target_file`
+        (e.g. queried a node whose file is util.py, but the clarification
+        itself was "change APP_NAME in constants.py") used to be
+        incorporated anyway -- the model, asked to revise util.py-ish code
+        to satisfy a constants.py-shaped request, produced something
+        wildly unrelated to `source.code_snapshot`, and the resulting
+        patch/merge saw that as "delete almost everything," surfacing a
+        bogus conflict that had nothing to do with a real edit conflict.
+        `patch()`'s whole diff-and-merge design assumes the clarification
+        genuinely concerns `source`'s own file -- unlike continue_from/
+        branch, there's no sane way to "redirect" a PATCH (it's a diff
+        against `target`'s current code, which is for the ORIGINAL file,
+        not whatever file the clarification turned out to be about).
+        Fails safely instead: raises `ClarificationFileMismatch` the
+        moment the model's own declared `target_file` (the same Phase 7
+        field used everywhere else) names a real, different, known file,
+        so the caller can surface a clear, actionable error instead of a
+        confusing diff.
         """
         prompt = (
             f"Revise this code to incorporate the following clarification.\n\n"
@@ -558,7 +588,20 @@ class Orchestrator:
             raise LLMGenerationFailed(
                 f"LLM failed to incorporate the clarification for node {source.id}"
             )
-        return branches[0]
+        branch = branches[0]
+
+        if branch.target_file and source.target_file and source.codebase_context:
+            known = list_known_files(source.codebase_context)
+            declared = match_known_file(branch.target_file, known)
+            current = match_known_file(source.target_file, known)
+            if declared is not None and declared != current:
+                raise ClarificationFileMismatch(
+                    f"This clarification is actually about {declared!r}, not "
+                    f"{source.target_file!r} (the file this node is about). "
+                    f"Apply it from a node that's actually about {declared!r}, "
+                    "or ask the clarification again scoped to the right file."
+                )
+        return branch
 
     def _find_query_entry(self, node: TreeNode, query_id: str) -> QueryEntry:
         entry = next((q for q in node.query_history if q.id == query_id), None)
@@ -833,6 +876,17 @@ class Orchestrator:
         Nodes that are neither ancestors of `node_id`, `node_id` itself, nor
         its descendants are orphaned (dimmed, never deleted). Anything on the
         new path that was previously orphaned is revived.
+
+        Intentional edge case, confirmed 2026-10-20 (a passing e2e assertion
+        turned out to be exercising a race, not this): backtracking to the
+        root node orphans nothing at all, and revives everything previously
+        orphaned. Root's descendants are, by definition, the entire rest of
+        the tree -- so under the one rule above, nothing is ever "off path"
+        from root. This isn't a special case in the code (none is coded),
+        and it's the semantically correct result: being back at the root
+        means no branch has been excluded yet, so nothing should look
+        excluded. Orphaning only becomes visible once you're actually
+        sitting inside one branch and its un-taken siblings dim.
         """
         async with self._lock:
             return self._activate_unlocked(node_id)

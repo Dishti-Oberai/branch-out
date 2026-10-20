@@ -1,0 +1,7 @@
+{
+  "id": "custom_027",
+  "description": "Consistent hashing ring (simplified)",
+  "prompt": "Implement a class `ConsistentHashRing` with `add_node(node: str) -> None`, `remove_node(node: str) -> None`, and `get_node(key: str) -> str` that returns which node a key maps to \u2014 the node whose hash is the smallest hash >= the key's hash (wrapping around), using Python's built-in `hash()` for positions. Raise `ValueError` if `get_node` is called with no nodes.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_consistent_for_same_key(self):\n        ring = ConsistentHashRing()\n        ring.add_node('server1')\n        ring.add_node('server2')\n        ring.add_node('server3')\n        result1 = ring.get_node('mykey')\n        result2 = ring.get_node('mykey')\n        self.assertEqual(result1, result2)\n    def test_no_nodes_raises(self):\n        ring = ConsistentHashRing()\n        with self.assertRaises(ValueError):\n            ring.get_node('key')\n    def test_remove_node(self):\n        ring = ConsistentHashRing()\n        ring.add_node('server1')\n        ring.remove_node('server1')\n        with self.assertRaises(ValueError):\n            ring.get_node('key')\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "custom"
+}

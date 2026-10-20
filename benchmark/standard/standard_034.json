@@ -1,0 +1,7 @@
+{
+  "id": "standard_034",
+  "description": "Bubble sort",
+  "prompt": "Write a Python function `bubble_sort(nums: list[int]) -> list[int]` that sorts a list using bubble sort, returning a new sorted list without mutating the input.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_unsorted(self):\n        self.assertEqual(bubble_sort([5,3,8,1,2]), [1,2,3,5,8])\n    def test_does_not_mutate_input(self):\n        original = [3,1,2]\n        bubble_sort(original)\n        self.assertEqual(original, [3,1,2])\n    def test_empty(self):\n        self.assertEqual(bubble_sort([]), [])\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}

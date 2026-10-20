@@ -1,0 +1,7 @@
+{
+  "id": "standard_019",
+  "description": "Fibonacci with memoization",
+  "prompt": "Write a Python function `fib(n: int) -> int` that returns the nth Fibonacci number (fib(0)=0, fib(1)=1), efficiently (no exponential-time recursion) for n up to at least 500.",
+  "test_suite": "import unittest\n\nclass Test(unittest.TestCase):\n    def test_base_cases(self):\n        self.assertEqual(fib(0), 0)\n        self.assertEqual(fib(1), 1)\n    def test_small(self):\n        self.assertEqual(fib(10), 55)\n    def test_large_runs_fast(self):\n        self.assertEqual(fib(500) > 0, True)\n\nif __name__ == '__main__':\n    unittest.main()",
+  "category": "standard"
+}
