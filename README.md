@@ -10,6 +10,24 @@ Available as a standalone web app and as a VS Code extension (Copilot-like, in-e
 
 ---
 
+## The problem
+
+Three things happen constantly in a real AI coding session, and a linear chat has no good answer to any of them:
+
+- **Requirements change mid-task.** You're three messages into an approach when the real constraint surfaces ("actually, it needs to support concurrent writes"). In a linear chat, the model has already committed to code built on the wrong assumption, and every message after it is tainted by that same stale context — your only options are to keep going and hope it course-corrects, or start a brand-new chat and re-explain everything from scratch.
+- **You want to compare real options, not just the first thing that came back.** Asking for "approach A," not liking it, then asking for "approach B instead" doesn't give you two approaches — it gives you one conversation that's now confused about which one it's actually building, with A's half-finished reasoning still polluting B's context.
+- **An earlier decision turns out to be wrong, after you've already built on top of it.** Going back means either losing everything you did since, or manually copying code out before you regenerate — there's no real "undo to here, keep exploring from there" that doesn't destroy one path to recover the other.
+
+## Why a tree is the fix, not just a nicer UI
+
+The usual workarounds are all the same idea wearing different clothes: open a second chat tab, paste the context into a fresh conversation, keep a scratch file of "the version I liked earlier." They all work, and they're all manual bookkeeping you do by hand, with no structure, no comparison, and no way to act on a result — if you liked branch A's error handling and branch B's data model, there's no path from "I noticed that" to a node that actually has both.
+
+A tree makes that bookkeeping structural instead of manual:
+- **Changing requirements** → `clarify-and-apply`: answer the clarifying question on the node where it came up, apply it forward onto where you actually are now — real git-based conflict detection, not a regenerate-and-hope.
+- **Comparing real options** → `branch`: N approaches generated in parallel, each genuinely isolated (its own node, its own context), scored automatically so "which one's actually better" has a real signal behind it instead of a gut call.
+- **A wrong earlier decision** → `backtrack`: instant, lossless — the path you leave dims but is never deleted, and jumping back to it revives it exactly as it was.
+- **"I liked parts of both"** → `merge siblings`: a real synthesis of two branches into one new node, not a manual copy-paste.
+
 ## What it does
 
 - **Branch**: ask for 3 (or N) approaches to the same prompt in parallel; each becomes its own node, scored automatically (test-based when the code has tests, LLM-judged otherwise).
@@ -49,24 +67,19 @@ A tree-structured session manager that sits between you and the Claude API. It i
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    FE["React (Vite)<br/>Tree canvas, node inspector"]
+    BE["FastAPI backend<br/>Orchestrator, TreeStateManager"]
+    API["Claude API<br/>(claude-sonnet-4-6)"]
+    VSC["VS Code extension<br/>active file/selection → backend state"]
+
+    FE <-->|HTTP / WebSocket| BE
+    BE <--> API
+    VSC -->|same page, embedded in a webview| FE
 ```
-┌─────────────────┐        ┌──────────────────┐        ┌───────────────────┐
-│   React (Vite)   │◄──────►│  FastAPI backend  │◄──────►│   Claude API       │
-│  Tree canvas,     │  HTTP/ │  Orchestrator,    │        │  (claude-sonnet-   │
-│  node inspector   │   WS   │  TreeStateManager │        │   4-6)             │
-└──────┬───────────┘        └─────────┬─────────┘        └────────────────────┘
-       │                               │
-       │ same page, embedded           │  in-memory tree (networkx-based
-       │ in a webview                  │  context graph + append-only
-       ▼                               │  node store); git-based merge/
-┌──────────────────┐                   │  conflict detection (gitpython);
-│  VS Code          │                   │  SQLite session persistence
-│  extension         │───────────────────┘  (save/load, not continuous)
-│  (active file/     │
-│   selection →       │
-│   backend state)    │
-└──────────────────┘
-```
+
+In-memory tree on the backend: a networkx-based context graph plus an append-only node store; git-based merge/conflict detection (`gitpython`); SQLite session persistence (explicit save/load, not continuous).
 
 <details>
 <summary><b>What each piece actually does</b> (click to expand)</summary>
