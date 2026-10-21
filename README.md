@@ -1,29 +1,39 @@
 # Branch-Out
 
-**A coding agent where exploring three approaches costs nothing — each one keeps its own history, and the other two are never lost.**
+**Branch into real, codebase-grounded approaches — and never lose one.**
 
-Every normal AI coding assistant is a straight line: each new message overwrites the context of the last. Try three approaches to the same problem and you're stuck re-explaining context across separate chats, or silently clobbering whichever one you tried first. Branch-Out keeps every approach as its own node in a tree — branch, compare, pick one — the rest just dim until you want them back.
+Branch-Out grounds every answer in your actual codebase and lets you compare real, scored approaches before committing to one, with that same context carried forward automatically on every follow-up. It does this by turning the session into a tree instead of a straight line: branch into 3 (or more) approaches in parallel, backtrack to any past decision without losing where you are now, question an old node mid-session without disturbing the active one, and merge two branches into a genuine combination of both. Every path stays exactly where you left it, dimmed but recoverable, one click from being back as it was. Available as a standalone web app and as a VS Code extension (Copilot-like, in-editor, with a visualized navigable history of every change).
 
-Available as a standalone web app and as a VS Code extension (Copilot-like, in-editor, with a visualized navigable history of every change).
+**Nearly 2.5x more reliable than one call with the same codebase context, no branching — measured with real Claude API calls and real unit-test scoring across 80 coding tasks.** Full breakdown in [Benchmark](#benchmark).
+
+Here's what that looks like inside VS Code: branch into three approaches, pick one and watch the file update, then backtrack to an earlier one and watch it revert — nothing is ever thrown away.
 
 ![Branch-Out demo — branching, picking, and backtracking inside VS Code](docs/demo.gif)
 
+<sub>Recorded live in this repo's own test workspace.</sub>
+
 ---
+
+## What it is — and isn't
+
+A tree-structured session manager that sits between you and the Claude API. It's not a multi-agent framework (one model, one call per branch), not a git wrapper (git only runs internally, to catch file conflicts), and not speculative code execution (every branch is a complete generation, scored before anything touches disk).
+
+Closer in spirit to inline-completion tools like Cursor or Copilot — the difference is what happens per prompt. Those give you one attempt, a single suggestion you accept or reject. Branch-Out gives you several at once: complete approaches generated in parallel, each scored before you even look at it, living as real nodes you can compare, back out of without losing your place, question individually, or combine two into one.
 
 ## The problem
 
 Three things happen constantly in a real AI coding session, and a linear chat has no good answer to any of them:
 
-- **Requirements change mid-task.** You're three messages into an approach when the real constraint surfaces ("actually, it needs to support concurrent writes"). In a linear chat, the model has already committed to code built on the wrong assumption, and every message after it is tainted by that same stale context — your only options are to keep going and hope it course-corrects, or start a brand-new chat and re-explain everything from scratch.
+- **Requirements change mid-task.** You're ten prompts into an approach when the real constraint surfaces ("actually, it needs to support concurrent writes"). The model's already committed to code built on the wrong assumption, and everything since has to be reconciled against it: output that starts second-guessing itself trying to honor both the old and new context, real rework across every file that assumed the wrong design, and a thread edging toward its context limit from carrying all of it.
 - **You want to compare real options, not just the first thing that came back.** Asking for "approach A," not liking it, then asking for "approach B instead" doesn't give you two approaches — it gives you one conversation that's now confused about which one it's actually building, with A's half-finished reasoning still polluting B's context.
-- **An earlier decision turns out to be wrong, after you've already built on top of it.** Going back means either losing everything you did since, or manually copying code out before you regenerate — there's no real "undo to here, keep exploring from there" that doesn't destroy one path to recover the other.
+- **An earlier decision turns out to be wrong, after you've already built on top of it.** Going back means either losing everything you did since, or manually copying code out before you regenerate — recovering the earlier path means destroying the later one.
 
 ## Why a tree is the fix, not just a nicer UI
 
-The usual workarounds are all the same idea wearing different clothes: open a second chat tab, paste the context into a fresh conversation, keep a scratch file of "the version I liked earlier." They all work, and they're all manual bookkeeping you do by hand, with no structure, no comparison, and no way to act on a result — if you liked branch A's error handling and branch B's data model, there's no path from "I noticed that" to a node that actually has both.
+The usual workarounds are all the same idea wearing different clothes: open a second chat tab, paste the context into a fresh conversation, keep a scratch file of "the version I liked earlier." They all work, but they're manual bookkeeping you do by hand — ad hoc, hard to compare side by side, and disconnected from actually doing anything with what you noticed. If you liked branch A's error handling and branch B's data model, turning "I noticed that" into a node that actually has both means building it yourself.
 
 A tree makes that bookkeeping structural instead of manual:
-- **Changing requirements** → `clarify-and-apply`: answer the clarifying question on the node where it came up, apply it forward onto where you actually are now — real git-based conflict detection, not a regenerate-and-hope.
+- **Changing requirements** → `clarify-and-apply`: answer the clarifying question on the node where it came up, apply it forward onto where you actually are now — real git-based conflict detection catches what a plain regenerate would silently overwrite.
 - **Comparing real options** → `branch`: N approaches generated in parallel, each genuinely isolated (its own node, its own context), scored automatically so "which one's actually better" has a real signal behind it instead of a gut call.
 - **A wrong earlier decision** → `backtrack`: instant, lossless — the path you leave dims but is never deleted, and jumping back to it revives it exactly as it was.
 - **"I liked parts of both"** → `merge siblings`: a real synthesis of two branches into one new node, not a manual copy-paste.
@@ -60,10 +70,6 @@ A tree makes that bookkeeping structural instead of manual:
 ![Merging two sibling branches into one synthesized node](docs/screenshots/06-merge.png)
 
 </details>
-
-## What it is — and isn't
-
-A tree-structured session manager that sits between you and the Claude API. It is **not** a multi-agent framework (one model, one call per branch), not a git wrapper (git is used internally only for conflict detection on file-apply, never exposed as a workflow), and branching isn't speculative execution of code — it's parallel *generation*, scored and shown to you before anything touches a file.
 
 ## Architecture
 
