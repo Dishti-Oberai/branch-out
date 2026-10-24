@@ -74,23 +74,22 @@ A tree makes that bookkeeping structural instead of manual:
 ## Architecture
 
 ```mermaid
+%%{init: {'themeVariables': {'lineColor':'#6B7280'}}}%%
 flowchart LR
+    VSC["VS Code extension<br/>active file/selection → backend state"]
+    L1["same page, embedded in a webview"]
     FE["React (Vite)<br/>Tree canvas, node inspector"]
+    L2["HTTP / WebSocket"]
     BE["FastAPI backend<br/>Orchestrator, TreeStateManager"]
     API["Claude API<br/>(claude-sonnet-4-6)"]
-    VSC["VS Code extension<br/>active file/selection → backend state"]
 
-    FE <-->|HTTP / WebSocket| BE
+    VSC --> L1 --> FE
+    FE <--> L2 <--> BE
     BE <--> API
-    VSC -->|same page, embedded in a webview| FE
 
-    classDef frontend fill:#534AB7,stroke:#3d3685,color:#fff
-    classDef backend fill:#1D9E75,stroke:#157a5b,color:#fff
-    classDef external fill:#D97757,stroke:#b35c3f,color:#fff
+    classDef node fill:#3B82F6,stroke:#2563eb,color:#fff
 
-    class FE,VSC frontend
-    class BE backend
-    class API external
+    class VSC,FE,BE,API,L1,L2 node
 ```
 
 In-memory tree on the backend: a networkx-based context graph plus an append-only node store; git-based merge/conflict detection (`gitpython`); SQLite session persistence (explicit save/load, not continuous).
