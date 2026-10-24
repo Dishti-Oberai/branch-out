@@ -83,6 +83,14 @@ flowchart LR
     FE <-->|HTTP / WebSocket| BE
     BE <--> API
     VSC -->|same page, embedded in a webview| FE
+
+    classDef frontend fill:#534AB7,stroke:#3d3685,color:#fff
+    classDef backend fill:#1D9E75,stroke:#157a5b,color:#fff
+    classDef external fill:#D97757,stroke:#b35c3f,color:#fff
+
+    class FE,VSC frontend
+    class BE backend
+    class API external
 ```
 
 In-memory tree on the backend: a networkx-based context graph plus an append-only node store; git-based merge/conflict detection (`gitpython`); SQLite session persistence (explicit save/load, not continuous).
